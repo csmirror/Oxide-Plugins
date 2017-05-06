@@ -8,7 +8,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-	[Info("Copy Paste", "Reneb", "3.1.1", ResourceId = 5981)] 
+	[Info("Copy Paste", "Reneb", "3.1.2", ResourceId = 5981)] 
 	[Description("Copy and paste your buildings to save them or move them")]
 
 	class CopyPaste : RustPlugin
@@ -16,8 +16,9 @@ namespace Oxide.Plugins
 		private int copyLayer = LayerMask.GetMask("Construction", "Construction Trigger", "Trigger", "Deployed", "Tree", "AI");
 		private int collisionLayer = LayerMask.GetMask("Construction", "Construction Trigger", "Trigger", "Deployed", "Default");
 		private int groundLayer = LayerMask.GetMask(new string[] { "Terrain", "Default" });
-		private int rayLayer = LayerMask.GetMask(new string[] { "Construction", "Deployed", "Tree", "Terrain", "Resource", "World", "Water", "Default", "Prevent Building" });
-
+		private int rayCopy = LayerMask.GetMask(new string[] { "Construction", "Deployed", "Tree", "Resource", "Prevent Building" });
+		private int rayPaste = LayerMask.GetMask(new string[] { "Construction", "Deployed", "Tree", "Terrain", "World", "Water", "Prevent Building" });
+		
 		private string copyPermission = "copypaste.copy";
 		private string pastePermission = "copypaste.paste";
 		private string undoPermission = "copypaste.undo";
@@ -96,7 +97,7 @@ namespace Oxide.Plugins
 			BaseEntity sourceEntity;
 			Vector3 sourcePoint;
 
-			if(!FindRayEntity(player.eyes.position, ViewAngles * Vector3.forward, out sourcePoint, out sourceEntity)) 
+			if(!FindRayEntity(player.eyes.position, ViewAngles * Vector3.forward, out sourcePoint, out sourceEntity, rayPaste)) 
 			{
 				return Lang("NO_ENTITY_RAY", player.UserIDString);
 			}
@@ -208,9 +209,7 @@ namespace Oxide.Plugins
 					
 					current++;
 				}
-			}
-			catch (Exception e)
-			{
+			} catch (Exception e) {
 				return e.Message;
 			}
 
@@ -228,7 +227,8 @@ namespace Oxide.Plugins
 			{
 				while(true)
 				{
-					if(current >= checkFrom.Count) break;
+					if(current >= checkFrom.Count) 
+						break;
 
 					List<BaseEntity> list = Pool.GetList<BaseEntity>();
 					Vis.Entities<BaseEntity>(checkFrom[current], range, list, copyLayer);
@@ -236,6 +236,7 @@ namespace Oxide.Plugins
 					for(int i = 0; i < list.Count; i++)
 					{
 						var entity = list[i];
+						
 						if(isValid(entity) && !houseList.Contains(entity))
 						{
 							houseList.Add(entity);
@@ -255,9 +256,7 @@ namespace Oxide.Plugins
 					
 					current++;
 				}
-			}
-			catch (Exception e)
-			{
+			} catch (Exception e) {
 				return e.Message;
 			}
 
@@ -409,7 +408,7 @@ namespace Oxide.Plugins
 			return maxHeight;
 		}
 
-		private bool FindRayEntity(Vector3 sourcePos, Vector3 sourceDir, out Vector3 point, out BaseEntity entity)
+		private bool FindRayEntity(Vector3 sourcePos, Vector3 sourceDir, out Vector3 point, out BaseEntity entity, int rayLayer)
 		{
 			RaycastHit hitinfo;
 			entity = null;
@@ -417,10 +416,10 @@ namespace Oxide.Plugins
 
 			if(!Physics.Raycast(sourcePos, sourceDir, out hitinfo, 1000f, rayLayer)) 
 				return false;
-
+			
+			entity = hitinfo.GetEntity();		
 			point = hitinfo.point;
-			entity = hitinfo.GetEntity();
-
+			
 			return true;
 		}
 
@@ -764,7 +763,7 @@ namespace Oxide.Plugins
 			BaseEntity sourceEntity;
 			Vector3 sourcePoint;
 
-			if(!FindRayEntity(player.eyes.position, ViewAngles * Vector3.forward, out sourcePoint, out sourceEntity))
+			if(!FindRayEntity(player.eyes.position, ViewAngles * Vector3.forward, out sourcePoint, out sourceEntity, rayCopy))
 			{
 				return Lang("NO_ENTITY_RAY", player.UserIDString);
 			}
@@ -783,9 +782,6 @@ namespace Oxide.Plugins
 
 			if(player == null) 
 				return "Couldn't find the player";
-
-			if(!player.IsConnected) 
-				return "Player is not connected?";
 
 			return TryCopyFromPlayer(player, filename, args);
 		}
