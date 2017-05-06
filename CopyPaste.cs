@@ -8,7 +8,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-	[Info("Copy Paste", "Reneb", "3.1.2", ResourceId = 5981)] 
+	[Info("Copy Paste", "Reneb", "3.1.3", ResourceId = 5981)] 
 	[Description("Copy and paste your buildings to save them or move them")]
 
 	class CopyPaste : RustPlugin
@@ -756,9 +756,6 @@ namespace Oxide.Plugins
 			if(player == null) 
 				return "Player is null?";
 
-			if(!player.IsConnected) 
-				return "Player is not connected?";
-
 			var ViewAngles = Quaternion.Euler(player.GetNetworkRotation());
 			BaseEntity sourceEntity;
 			Vector3 sourcePoint;
@@ -937,6 +934,7 @@ namespace Oxide.Plugins
 					lockentity.SetParent(lockableEntity, "lock");
 					lockentity.OnDeployed(lockableEntity);
 					lockentity.Spawn();
+					
 					lockableEntity.SetSlot(BaseEntity.Slot.Lock, lockentity);
 					
 					if(lockentity.GetComponent<CodeLock>())
@@ -1101,7 +1099,7 @@ namespace Oxide.Plugins
 				if(entity == null || entity.IsDestroyed) 
 					continue;
 				
-				entity.KillMessage();
+				entity.Kill();
 			}
 
 			lastPastes.Remove(player.UserIDString);
