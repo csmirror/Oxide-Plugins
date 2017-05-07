@@ -8,7 +8,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-	[Info("Copy Paste", "Reneb", "3.1.3", ResourceId = 5981)] 
+	[Info("Copy Paste", "Reneb", "3.1.4", ResourceId = 5981)] 
 	[Description("Copy and paste your buildings to save them or move them")]
 
 	class CopyPaste : RustPlugin
@@ -62,7 +62,42 @@ namespace Oxide.Plugins
 		}
 
 		//API
+		
+		object TryCopyFromPlayer(BasePlayer player, string filename, string[] args)
+		{
+			if(player == null) 
+				return "Player is null?";
 
+			if(!player.IsConnected) 
+				return "Player is not connected?";
+			
+			var ViewAngles = Quaternion.Euler(player.GetNetworkRotation());
+			BaseEntity sourceEntity;
+			Vector3 sourcePoint;
+
+			if(!FindRayEntity(player.eyes.position, ViewAngles * Vector3.forward, out sourcePoint, out sourceEntity, rayCopy))
+			{
+				return Lang("NO_ENTITY_RAY", player.UserIDString);
+			}
+
+			return TryCopy(sourcePoint, sourceEntity.transform.rotation.ToEulerAngles(), filename, ViewAngles.ToEulerAngles().y, args);
+		}
+
+		object TryCopyFromSteamID(string steamid, string filename, string[] args)
+		{
+			ulong userid;
+
+			if(!ulong.TryParse(steamid, out userid)) 
+				return "First argument isn't a steamid";
+
+			var player = BasePlayer.FindByID(userid);
+
+			if(player == null) 
+				return "Couldn't find the player";
+
+			return TryCopyFromPlayer(player, filename, args);
+		}
+		
 		object TryPasteFromVector3(Vector3 startPos, Vector3 direction, string filename, string[] args)
 		{
 			return TryPaste(startPos, filename, null, direction.y, args);
@@ -749,38 +784,6 @@ namespace Oxide.Plugins
 			}
 
 			return Copy(sourcePos, sourceRot, filename, RotationCorrection, copyMechanics, radius, saveBuilding, saveDeployables, saveInventories);
-		}
-
-		private object TryCopyFromPlayer(BasePlayer player, string filename, string[] args)
-		{
-			if(player == null) 
-				return "Player is null?";
-
-			var ViewAngles = Quaternion.Euler(player.GetNetworkRotation());
-			BaseEntity sourceEntity;
-			Vector3 sourcePoint;
-
-			if(!FindRayEntity(player.eyes.position, ViewAngles * Vector3.forward, out sourcePoint, out sourceEntity, rayCopy))
-			{
-				return Lang("NO_ENTITY_RAY", player.UserIDString);
-			}
-
-			return TryCopy(sourcePoint, sourceEntity.transform.rotation.ToEulerAngles(), filename, ViewAngles.ToEulerAngles().y, args);
-		}
-
-		private object TryCopyFromSteamID(string steamid, string filename, string[] args)
-		{
-			ulong userid;
-
-			if(!ulong.TryParse(steamid, out userid)) 
-				return "First argument isn't a steamid";
-
-			var player = BasePlayer.FindByID(userid);
-
-			if(player == null) 
-				return "Couldn't find the player";
-
-			return TryCopyFromPlayer(player, filename, args);
 		}
 				
 		private void TryCopyLock(BaseEntity lockableEntity, IDictionary<string, object> housedata)
