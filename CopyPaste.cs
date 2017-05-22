@@ -8,16 +8,16 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-	[Info("Copy Paste", "Reneb", "3.1.4", ResourceId = 5981)] 
+	[Info("Copy Paste", "Reneb", "3.1.5", ResourceId = 5981)] 
 	[Description("Copy and paste your buildings to save them or move them")]
 
 	class CopyPaste : RustPlugin
 	{
-		private int copyLayer = LayerMask.GetMask("Construction", "Construction Trigger", "Trigger", "Deployed", "Tree", "AI");
-		private int collisionLayer = LayerMask.GetMask("Construction", "Construction Trigger", "Trigger", "Deployed", "Default");
-		private int groundLayer = LayerMask.GetMask(new string[] { "Terrain", "Default" });
-		private int rayCopy = LayerMask.GetMask(new string[] { "Construction", "Deployed", "Tree", "Resource", "Prevent Building" });
-		private int rayPaste = LayerMask.GetMask(new string[] { "Construction", "Deployed", "Tree", "Terrain", "World", "Water", "Prevent Building" });
+		private int copyLayer 		= LayerMask.GetMask("Construction", "Construction Trigger", "Trigger", "Deployed", "Tree", "AI");
+		private int collisionLayer 	= LayerMask.GetMask("Construction", "Construction Trigger", "Trigger", "Deployed", "Default");
+		private int groundLayer 	= LayerMask.GetMask("Terrain", "Default");
+		private int rayCopy 		= LayerMask.GetMask("Construction", "Deployed", "Tree", "Resource", "Prevent Building");
+		private int rayPaste 		= LayerMask.GetMask("Construction", "Deployed", "Tree", "Terrain", "World", "Water", "Prevent Building");
 		
 		private string copyPermission = "copypaste.copy";
 		private string pastePermission = "copypaste.paste";
@@ -28,11 +28,7 @@ namespace Oxide.Plugins
 
 		private DataFileSystem dataSystem = Interface.Oxide.DataFileSystem;
 
-		private enum CopyMechanics
-		{
-			Building,
-			Proximity
-		}
+		private enum CopyMechanics { Building, Proximity }
 
 		//Hooks
 
@@ -63,13 +59,12 @@ namespace Oxide.Plugins
 
 		//API
 		
-		object TryCopyFromPlayer(BasePlayer player, string filename, string[] args)
+		object TryCopyFromSteamID(ulong userID, string filename, string[] args)
 		{
-			if(player == null) 
-				return "Player is null?";
+			var player = BasePlayer.FindByID(userID);
 
-			if(!player.IsConnected) 
-				return "Player is not connected?";
+			if(player == null) 
+				return Lang("NOT_FOUND_PLAYER", player.UserIDString);
 			
 			var ViewAngles = Quaternion.Euler(player.GetNetworkRotation());
 			BaseEntity sourceEntity;
@@ -82,51 +77,18 @@ namespace Oxide.Plugins
 
 			return TryCopy(sourcePoint, sourceEntity.transform.rotation.ToEulerAngles(), filename, ViewAngles.ToEulerAngles().y, args);
 		}
-
-		object TryCopyFromSteamID(string steamid, string filename, string[] args)
-		{
-			ulong userid;
-
-			if(!ulong.TryParse(steamid, out userid)) 
-				return "First argument isn't a steamid";
-
-			var player = BasePlayer.FindByID(userid);
-
-			if(player == null) 
-				return "Couldn't find the player";
-
-			return TryCopyFromPlayer(player, filename, args);
-		}
 		
 		object TryPasteFromVector3(Vector3 startPos, Vector3 direction, string filename, string[] args)
 		{
 			return TryPaste(startPos, filename, null, direction.y, args);
 		}
 
-		object TryPasteFromSteamID(string steamid, string filename, string[] args)
+		object TryPasteFromSteamID(ulong userID, string filename, string[] args)
 		{
-			ulong userid;
-
-			if(!ulong.TryParse(steamid, out userid)) 
-			{ 
-				return "First argument isn't a steamid"; 
-			}
-
-			var player = BasePlayer.FindByID(userid);
+			var player = BasePlayer.FindByID(userID);
 
 			if(player == null) 
-				return "Couldn't find the player";
-
-			return TryPasteFromPlayer(player, filename, args);
-		}
-
-		object TryPasteFromPlayer(BasePlayer player, string filename, string[] args)
-		{
-			if(player == null) 
-				return "Player is null?";
-
-			if(!player.IsConnected) 
-				return "Player is not connected?";
+				return Lang("NOT_FOUND_PLAYER", player.UserIDString);
 
 			var ViewAngles = Quaternion.Euler(player.GetNetworkRotation());
 			BaseEntity sourceEntity;
@@ -161,7 +123,7 @@ namespace Oxide.Plugins
 		private object Copy(Vector3 sourcePos, Vector3 sourceRot, string filename, float RotationCorrection, CopyMechanics copyMechanics, float range, bool saveBuildings, bool saveDeployables, bool saveInventories)
 		{
 			var rawData = new List<object>();
-			var copy = copyMechanics == CopyMechanics.Proximity ? CopyByProximity(sourcePos, sourceRot, RotationCorrection, range, saveBuildings, saveDeployables, saveInventories) : CopyByBuilding(sourcePos, sourceRot, RotationCorrection, range, saveBuildings, saveDeployables, saveInventories); ;
+			var copy = CopyProcess(sourcePos, sourceRot, RotationCorrection, range, saveBuildings, saveDeployables, saveInventories, copyMechanics);
 
 			if(copy is string) 
 				return copy;
@@ -193,7 +155,7 @@ namespace Oxide.Plugins
 			return true;
 		}
 
-		private object CopyByBuilding(Vector3 sourcePos, Vector3 sourceRot, float RotationCorrection, float range, bool saveBuildings, bool saveDeployables, bool saveInventories)
+		private object CopyProcess(Vector3 sourcePos, Vector3 sourceRot, float RotationCorrection, float range, bool saveBuildings, bool saveDeployables, bool saveInventories, CopyMechanics copyMechanics)
 		{
 			var rawData = new List<object>();
 			var houseList = new List<BaseEntity>();
@@ -219,14 +181,17 @@ namespace Oxide.Plugins
 						{
 							houseList.Add(entity);
 							
-							var buildingblock = entity.GetComponentInParent<BuildingBlock>();
-							
-							if(buildingblock)
+							if(copyMechanics == CopyMechanics.Building)
 							{
-								if(buildingid == 0) 
-									buildingid = buildingblock.buildingID;
-								else if(buildingid != buildingblock.buildingID) 
-									continue;
+								BuildingBlock buildingblock = entity.GetComponentInParent<BuildingBlock>();
+
+								if(buildingblock)
+								{
+									if(buildingid == 0) 
+										buildingid = buildingblock.buildingID;
+									else if(buildingid != buildingblock.buildingID) 
+										continue;
+								}
 							}
 							
 							if(!checkFrom.Contains(entity.transform.position)) 
@@ -251,54 +216,7 @@ namespace Oxide.Plugins
 			return rawData;
 		}
 
-		private object CopyByProximity(Vector3 sourcePos, Vector3 sourceRot, float RotationCorrection, float range, bool saveBuildings, bool saveDeployables, bool saveInventories)
-		{
-			var rawData = new List<object>();
-			var houseList = new List<BaseEntity>();
-			var checkFrom = new List<Vector3> { sourcePos };
-			int current = 0;
-
-			try
-			{
-				while(true)
-				{
-					if(current >= checkFrom.Count) 
-						break;
-
-					List<BaseEntity> list = Pool.GetList<BaseEntity>();
-					Vis.Entities<BaseEntity>(checkFrom[current], range, list, copyLayer);
-
-					for(int i = 0; i < list.Count; i++)
-					{
-						var entity = list[i];
-						
-						if(isValid(entity) && !houseList.Contains(entity))
-						{
-							houseList.Add(entity);
-							
-							if(!checkFrom.Contains(entity.transform.position)) 
-								checkFrom.Add(entity.transform.position);
-
-							if(!saveBuildings && entity.GetComponentInParent<BuildingBlock>() != null) 
-								continue;
-							
-							if(!saveDeployables && (entity.GetComponentInParent<BuildingBlock>() == null && entity.GetComponent<BaseCombatEntity>() != null)) 
-								continue;
-
-							rawData.Add(EntityData(entity, sourcePos, sourceRot, entity.transform.position, entity.transform.rotation.ToEulerAngles(), RotationCorrection, saveInventories));
-						}
-					}
-					
-					current++;
-				}
-			} catch (Exception e) {
-				return e.Message;
-			}
-
-			return rawData;
-		}
-
-		private Dictionary<string,object> EntityData(BaseEntity entity, Vector3 sourcePos, Vector3 sourceRot, Vector3 entPos, Vector3 entRot, float diffRot, bool saveInventories)
+		private Dictionary<string, object> EntityData(BaseEntity entity, Vector3 sourcePos, Vector3 sourceRot, Vector3 entPos, Vector3 entRot, float diffRot, bool saveInventories)
 		{
 			var normalizedPos = NormalizePosition(sourcePos, entPos, diffRot);
 			var normalizedRot = entRot.y - diffRot;
@@ -458,16 +376,6 @@ namespace Oxide.Plugins
 			return true;
 		}
 
-		private void FixPreloadData(IList<Dictionary<string,object>> entities, float heightAdj)
-		{
-			foreach(var entity in entities)
-			{
-				var pos = ((Vector3)entity["position"]);
-				pos.y += heightAdj;
-				entity["position"] = pos;
-			}
-		}
-
 		private object GetGround(Vector3 pos)
 		{
 			RaycastHit hitInfo;
@@ -524,7 +432,7 @@ namespace Oxide.Plugins
 					var pos = (Vector3)data["position"];
 					var rot = (Quaternion)data["rotation"];
 
-					bool isplaced = false;
+					bool isPlaced = false;
 					
 					if(checkPlaced)
 					{
@@ -536,14 +444,14 @@ namespace Oxide.Plugins
 							{
 								if(ent.PrefabName == prefabname && ent.transform.position == pos && ent.transform.rotation == rot)
 								{
-									isplaced = true;
+									isPlaced = true;
 									break;
 								}
 							}
 						}
 					}
 
-					if(isplaced) 
+					if(isPlaced) 
 						continue;
 
 					var entity = GameManager.server.CreateEntity(prefabname, pos, rot, true);
@@ -710,15 +618,13 @@ namespace Oxide.Plugins
 
 		private object TryCopy(Vector3 sourcePos, Vector3 sourceRot, string filename, float RotationCorrection, string[] args)
 		{
+			bool saveInventories = true, saveDeployables = true, saveBuilding = true;
 			CopyMechanics copyMechanics = CopyMechanics.Building;
 			float radius = 3f;
-			bool saveInventories = true;
-			bool saveDeployables = true;
-			bool saveBuilding = true;
 			
 			for(int i = 0; ; i = i + 2)
 			{
-				if(i >= args.Length) 
+				if(i >= args.Length)  
 					break;
 				
 				if(i+1 >= args.Length)
@@ -839,7 +745,7 @@ namespace Oxide.Plugins
 				
 				if(i + 1 >= args.Length)
 				{
-					return Lang("SYNTAX_PASTE_OR_PLACEBACK", steamid);
+					return Lang("SYNTAX_PASTE_OR_PASTEBACK", steamid);
 				}
 				
 				switch(args[i].ToLower())
@@ -887,7 +793,7 @@ namespace Oxide.Plugins
 						
 						break;
 					default:
-						return Lang("SYNTAX_PASTE_OR_PLACEBACK", steamid);
+						return Lang("SYNTAX_PASTE_OR_PASTEBACK", steamid);
 						break;
 				}
 			}
@@ -906,7 +812,13 @@ namespace Oxide.Plugins
 				}
 				
 				heightAdj = (float)bestHeight - startPos.y;
-				FixPreloadData(preloadData, heightAdj);
+
+				foreach(var entity in preloadData)
+				{
+					var pos = ((Vector3)entity["position"]);
+					pos.y += heightAdj;
+					entity["position"] = pos;
+				}				
 			}
 
 			if(blockCollision > 0f)
@@ -1007,7 +919,7 @@ namespace Oxide.Plugins
 			}
 
 			var savename = args[0];
-			var success = TryCopyFromPlayer(player, savename, args.Skip(1).ToArray());
+			var success = TryCopyFromSteamID(player.userID, savename, args.Skip(1).ToArray());
 
 			if(success is string) 
 			{
@@ -1029,12 +941,12 @@ namespace Oxide.Plugins
 
 			if(args.Length < 1) 
 			{ 
-				SendReply(player, Lang("SYNTAX_PASTE_OR_PLACEBACK", player.UserIDString)); 
+				SendReply(player, Lang("SYNTAX_PASTE_OR_PASTEBACK", player.UserIDString)); 
 				return; 
 			}
 
 			var loadname = args[0];
-			var success = TryPasteFromPlayer(player, loadname, args.Skip(1).ToArray());
+			var success = TryPasteFromSteamID(player.userID, loadname, args.Skip(1).ToArray());
 
 			if(success is string)
 			{
@@ -1061,7 +973,7 @@ namespace Oxide.Plugins
 
 			if(args.Length < 1)
 			{ 
-				SendReply(player, Lang("SYNTAX_PLACEBACK", player.UserIDString)); 
+				SendReply(player, Lang("SYNTAX_PASTEBACK", player.UserIDString)); 
 				return; 
 			}
 
@@ -1079,7 +991,7 @@ namespace Oxide.Plugins
 
 			lastPastes.Add(player.UserIDString, (List<BaseEntity>)success);
 
-			SendReply(player, Lang("PLACEBACK_SUCCESS", player.UserIDString));
+			SendReply(player, Lang("PASTEBACK_SUCCESS", player.UserIDString));
 		}
 
 		[ChatCommand("undo")]
@@ -1126,15 +1038,15 @@ namespace Oxide.Plugins
 				{"en", "You don't have the permissions to use this command"},
 				{"ru", "У вас нет прав доступа к данной команде"},
 			}},			
-			{"SYNTAX_PLACEBACK", new Dictionary<string, string>() {
+			{"SYNTAX_PASTEBACK", new Dictionary<string, string>() {
 				{"en", "Syntax: /placeback TARGETFILENAME options values\nheight XX - Adjust the height\ncheckplaced true/false - checks if parts of the house are already placed or not, if they are already placed, the building part will be removed"},
 				{"ru", "Синтаксис: /placeback НАЗВАНИЕОБЪЕКТА опция значение\nheight XX - Высота от земли\ncheckplaced true/false - если часть здания уже вставлена, то объект будет пропущен"},
 			}},		
-			{"SYNTAX_PASTE_OR_PLACEBACK", new Dictionary<string, string>() {
+			{"SYNTAX_PASTE_OR_PASTEBACK", new Dictionary<string, string>() {
 				{"en", "Syntax: /paste or /placeback TARGETFILENAME options values\nheight XX - Adjust the height\nautoheight true/false - sets best height, carefull of the steep\ncheckplaced true/false - checks if parts of the house are already placed or not, if they are already placed, the building part will be removed\nblockcollision XX - blocks the entire paste if something the new building collides with something\ndeployables true/false - false to remove deployables\ninventories true/false - false to ignore inventories"},
 				{"ru", "Синтаксис: /paste or /placeback НАЗВАНИЕОБЪЕКТА опция значение\nheight XX - Высота от земли\nautoheight true/false - автоматически подобрать высоту от земли\ncheckplaced true/false - если часть здания уже вставлена, то объект будет пропущен\nblockcollision XX - блокировать вставку, если что-то этому мешает\ndeployables true/false - false для удаления предметов\ninventories true/false - false для игнорирования копирования инвентаря"},
 			}},		
-			{"PLACEBACK_SUCCESS", new Dictionary<string, string>() {
+			{"PASTEBACK_SUCCESS", new Dictionary<string, string>() {
 				{"en", "You've successfully placed back the structure"},
 				{"ru", "Постройка успешно вставлена на старое место"},
 			}},		
@@ -1161,7 +1073,11 @@ namespace Oxide.Plugins
 			{"UNDO_SUCCESS", new Dictionary<string, string>() {
 				{"en", "You've successfully undid what you pasted"},
 				{"ru", "Вы успешно снесли вставленную постройку"},
-			}},			 		
+			}},			 
+			{"NOT_FOUND_PLAYER", new Dictionary<string, string>() {
+				{"en", "Couldn't find the player"},
+				{"ru", "Не удалось найти игрока"},
+			}}	
 		};
 	}
 }
