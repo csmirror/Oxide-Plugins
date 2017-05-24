@@ -8,7 +8,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-	[Info("Copy Paste", "Reneb", "3.1.6", ResourceId = 716)] 
+	[Info("Copy Paste", "Reneb", "3.1.7", ResourceId = 716)] 
 	[Description("Copy and paste your buildings to save them or move them")]
 
 	class CopyPaste : RustPlugin
@@ -1022,6 +1022,30 @@ namespace Oxide.Plugins
 			SendReply(player, Lang("UNDO_SUCCESS", player.UserIDString));
 		}
 
+		//Console commands
+
+		[ConsoleCommand("pasteback")]
+        private void cmdConsolePasteBack(ConsoleSystem.Arg arg)
+        {	
+			BasePlayer player = arg.Player();
+			
+            if(player == null)
+				return;
+			
+			cmdChatPasteBack(player, arg.cmd.Name, arg.Args); 		
+		}
+		
+		[ConsoleCommand("undo")]
+        private void cmdConsoleUndo(ConsoleSystem.Arg arg)
+        {		
+			BasePlayer player = arg.Player();
+			
+            if(player == null)
+				return;
+			
+			cmdChatUndo(player, arg.cmd.Name, arg.Args); 
+		} 
+		
 		//Languages phrases 
 
 		private readonly Dictionary<string, Dictionary<string, string>> messages = new Dictionary<string, Dictionary<string, string>> 
