@@ -8,7 +8,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-	[Info("Copy Paste", "Reneb", "3.1.7", ResourceId = 716)] 
+	[Info("Copy Paste", "Reneb", "3.1.8", ResourceId = 716)] 
 	[Description("Copy and paste your buildings to save them or move them")]
 
 	class CopyPaste : RustPlugin
@@ -163,54 +163,49 @@ namespace Oxide.Plugins
 			uint buildingid = 0;
 			int current = 0;
 
-			try
+			while(true)
 			{
-				while(true)
+				if(current >= checkFrom.Count) 
+					break;
+
+				List<BaseEntity> list = Pool.GetList<BaseEntity>();
+				Vis.Entities<BaseEntity>(checkFrom[current], range, list, copyLayer);
+
+				for(int i = 0; i < list.Count; i++)
 				{
-					if(current >= checkFrom.Count) 
-						break;
-
-					List<BaseEntity> list = Pool.GetList<BaseEntity>();
-					Vis.Entities<BaseEntity>(checkFrom[current], range, list, copyLayer);
-
-					for(int i = 0; i < list.Count; i++)
-					{
-						var entity = list[i];
-						
-						if(isValid(entity) && !houseList.Contains(entity))
-						{
-							houseList.Add(entity);
-							
-							if(copyMechanics == CopyMechanics.Building)
-							{
-								BuildingBlock buildingblock = entity.GetComponentInParent<BuildingBlock>();
-
-								if(buildingblock)
-								{
-									if(buildingid == 0) 
-										buildingid = buildingblock.buildingID;
-									else if(buildingid != buildingblock.buildingID) 
-										continue;
-								}
-							}
-							
-							if(!checkFrom.Contains(entity.transform.position)) 
-								checkFrom.Add(entity.transform.position);
-
-							if(!saveBuildings && entity.GetComponentInParent<BuildingBlock>() != null) 
-								continue;
-							
-							if(!saveDeployables && (entity.GetComponentInParent<BuildingBlock>() == null && entity.GetComponent<BaseCombatEntity>() != null)) 
-								continue;
-							
-							rawData.Add(EntityData(entity, sourcePos, sourceRot, entity.transform.position, entity.transform.rotation.ToEulerAngles(), RotationCorrection, saveInventories));
-						}
-					}
+					var entity = list[i];
 					
-					current++;
+					if(isValid(entity) && !houseList.Contains(entity))
+					{
+						houseList.Add(entity);
+						
+						if(copyMechanics == CopyMechanics.Building)
+						{
+							BuildingBlock buildingblock = entity.GetComponentInParent<BuildingBlock>();
+
+							if(buildingblock)
+							{
+								if(buildingid == 0) 
+									buildingid = buildingblock.buildingID;
+								else if(buildingid != buildingblock.buildingID) 
+									continue;
+							}
+						}
+						
+						if(!checkFrom.Contains(entity.transform.position)) 
+							checkFrom.Add(entity.transform.position);
+
+						if(!saveBuildings && entity.GetComponentInParent<BuildingBlock>() != null) 
+							continue;
+						
+						if(!saveDeployables && (entity.GetComponentInParent<BuildingBlock>() == null && entity.GetComponent<BaseCombatEntity>() != null)) 
+							continue;
+						
+						rawData.Add(EntityData(entity, sourcePos, sourceRot, entity.transform.position, entity.transform.rotation.ToEulerAngles(), RotationCorrection, saveInventories));
+					}
 				}
-			} catch (Exception e) {
-				return e.Message;
+				
+				current++;
 			}
 
 			return rawData;
@@ -417,7 +412,7 @@ namespace Oxide.Plugins
 			return transformedPos;
 		}
 
-		private List<BaseEntity> Paste(List<Dictionary<string,object>> entities, Vector3 startPos, BasePlayer player, bool checkPlaced)
+		private List<BaseEntity> Paste(List<Dictionary<string,object>> entities, Vector3 startPos, BasePlayer player)
 		{
 			bool unassignid = true;
 			uint buildingid = 0;
@@ -425,163 +420,154 @@ namespace Oxide.Plugins
 			
 			foreach(var data in entities)
 			{
-				try
+				var prefabname = (string)data["prefabname"];
+				var skinid = ulong.Parse(data["skinid"].ToString());
+				var pos = (Vector3)data["position"];
+				var rot = (Quaternion)data["rotation"];
+
+				bool isPlaced = false;
+
+				List<BaseEntity> ents = new List<BaseEntity>();
+				Vis.Entities<BaseEntity>(pos, 2f, ents);
+				
+				foreach(BaseEntity ent in ents)
+				{						
+					if(ent.PrefabName == prefabname && ent.transform.position == pos && ent.transform.rotation == rot)
+					{
+						isPlaced = true;
+						break;
+					}
+				}
+
+				if(isPlaced)
+					continue;
+				
+				var entity = GameManager.server.CreateEntity(prefabname, pos, rot, true);
+				
+				if(entity != null)
 				{
-					var prefabname = (string)data["prefabname"];
-					var skinid = ulong.Parse(data["skinid"].ToString());
-					var pos = (Vector3)data["position"];
-					var rot = (Quaternion)data["rotation"];
+					entity.transform.position = pos;
+					entity.transform.rotation = rot;
+					entity.SendMessage("SetDeployedBy", player, SendMessageOptions.DontRequireReceiver);
 
-					bool isPlaced = false;
+					var buildingblock = entity.GetComponentInParent<BuildingBlock>();
 					
-					if(checkPlaced)
+					if(buildingblock != null)
 					{
-						foreach(var col in Physics.OverlapSphere(pos, 1f))
+						buildingblock.blockDefinition = PrefabAttribute.server.Find<Construction>(buildingblock.prefabID);
+						buildingblock.SetGrade((BuildingGrade.Enum)data["grade"]);
+						
+						if(unassignid)
 						{
-							var ent = col.GetComponentInParent<BaseEntity>();
-							
-							if(ent != null)
-							{
-								if(ent.PrefabName == prefabname && ent.transform.position == pos && ent.transform.rotation == rot)
-								{
-									isPlaced = true;
-									break;
-								}
-							}
+							buildingid = BuildingBlock.NewBuildingID();
+							unassignid = false;
 						}
+						
+						buildingblock.buildingID = buildingid;
+					}
+					
+					entity.skinID = skinid;
+					entity.Spawn();
+
+					var basecombat = entity.GetComponentInParent<BaseCombatEntity>();
+					
+					if(basecombat != null)
+					{
+						basecombat.ChangeHealth(basecombat.MaxHealth());
 					}
 
-					if(isPlaced) 
-						continue;
-
-					var entity = GameManager.server.CreateEntity(prefabname, pos, rot, true);
-					
-					if(entity != null)
+					if(entity.HasSlot(BaseEntity.Slot.Lock))
 					{
-						entity.transform.position = pos;
-						entity.transform.rotation = rot;
-						entity.SendMessage("SetDeployedBy", player, SendMessageOptions.DontRequireReceiver);
+						TryPasteLock(entity, data);
+					}
 
-						var buildingblock = entity.GetComponentInParent<BuildingBlock>();
+					var box = entity.GetComponentInParent<StorageContainer>();
+					
+					if(box != null)
+					{
+						box.inventory.Clear();
+						var items = data["items"] as List<object>;
+						var itemlist = new List<ItemAmount>();
 						
-						if(buildingblock != null)
+						foreach(var itemDef in items)
 						{
-							buildingblock.blockDefinition = PrefabAttribute.server.Find<Construction>(buildingblock.prefabID);
-							buildingblock.SetGrade((BuildingGrade.Enum)data["grade"]);
+							var item = itemDef as Dictionary<string, object>;
+							var itemid = Convert.ToInt32(item["id"]);
+							var itemamount = Convert.ToInt32(item["amount"]);
+							var itemskin = ulong.Parse(item["skinid"].ToString());
+							var itemcondition = Convert.ToSingle(item["condition"]);
+
+							var i = ItemManager.CreateByItemID(itemid, itemamount, itemskin);
 							
-							if(unassignid)
+							if(i != null)
 							{
-								buildingid = BuildingBlock.NewBuildingID();
-								unassignid = false;
-							}
-							
-							buildingblock.buildingID = buildingid;
-						}
-						
-						entity.skinID = skinid;
-						entity.Spawn();
+								i.condition = itemcondition;
 
-						var basecombat = entity.GetComponentInParent<BaseCombatEntity>();
-						
-						if(basecombat != null)
-						{
-							basecombat.ChangeHealth(basecombat.MaxHealth());
-						}
-
-						if(entity.HasSlot(BaseEntity.Slot.Lock))
-						{
-							TryPasteLock(entity, data);
-						}
-
-						var box = entity.GetComponentInParent<StorageContainer>();
-						
-						if(box != null)
-						{
-							box.inventory.Clear();
-							var items = data["items"] as List<object>;
-							var itemlist = new List<ItemAmount>();
-							
-							foreach(var itemDef in items)
-							{
-								var item = itemDef as Dictionary<string, object>;
-								var itemid = Convert.ToInt32(item["id"]);
-								var itemamount = Convert.ToInt32(item["amount"]);
-								var itemskin = ulong.Parse(item["skinid"].ToString());
-								var itemcondition = Convert.ToSingle(item["condition"]);
-
-								var i = ItemManager.CreateByItemID(itemid, itemamount, itemskin);
-								
-								if(i != null)
+								if(item.ContainsKey("magazine"))
 								{
-									i.condition = itemcondition;
-
-									if(item.ContainsKey("magazine"))
-									{
-										var heldent = i.GetHeldEntity();
-										
-										if(heldent != null)
-										{
-											var projectiles = heldent.GetComponent<BaseProjectile>();
-											
-											if(projectiles != null)
-											{
-												var magazine = item["magazine"] as Dictionary<string, object>;
-												var ammotype = int.Parse(magazine.Keys.ToArray()[0]);
-												var ammoamount = int.Parse(magazine[ammotype.ToString()].ToString());	
-												
-												projectiles.primaryMagazine.ammoType = ItemManager.FindItemDefinition(ammotype);
-												projectiles.primaryMagazine.contents = ammoamount;
-											}
-											
-											//TODO: Compability water 
-											
-											if(item.ContainsKey("items"))
-											{	
-												var itemContainsList = item["items"] as List<object>;
-												
-												foreach(var itemContains in itemContainsList)
-												{
-													var contents = itemContains as Dictionary<string, object>;
-													
-													i.contents.AddItem(ItemManager.FindItemDefinition(Convert.ToInt32(contents["id"])), Convert.ToInt32(contents["amount"]));		
-												}
-											}											
-										}
-									}
+									var heldent = i.GetHeldEntity();
 									
-									i?.MoveToContainer(box.inventory).ToString();
+									if(heldent != null)
+									{
+										var projectiles = heldent.GetComponent<BaseProjectile>();
+										
+										if(projectiles != null)
+										{
+											var magazine = item["magazine"] as Dictionary<string, object>;
+											var ammotype = int.Parse(magazine.Keys.ToArray()[0]);
+											var ammoamount = int.Parse(magazine[ammotype.ToString()].ToString());	
+											
+											projectiles.primaryMagazine.ammoType = ItemManager.FindItemDefinition(ammotype);
+											projectiles.primaryMagazine.contents = ammoamount;
+										}
+										
+										//TODO: Compability water 
+										
+										if(item.ContainsKey("items"))
+										{	
+											var itemContainsList = item["items"] as List<object>;
+											
+											foreach(var itemContains in itemContainsList)
+											{
+												var contents = itemContains as Dictionary<string, object>;
+												
+												i.contents.AddItem(ItemManager.FindItemDefinition(Convert.ToInt32(contents["id"])), Convert.ToInt32(contents["amount"]));		
+											}
+										}											
+									}
 								}
-							};
-						}
-
-						var sign = entity.GetComponentInParent<Signage>();
-						
-						if(sign != null)
-						{
-							var signData = data["sign"] as Dictionary<string, object>;
-							
-							if(signData.ContainsKey("texture"))
-							{
-								var stream = new MemoryStream();
-								var stringSign = Convert.FromBase64String(signData["texture"].ToString());
-								stream.Write(stringSign, 0, stringSign.Length);
-								sign.textureID = FileStorage.server.Store(stream, FileStorage.Type.png, sign.net.ID);
-								stream.Position = 0;
-								stream.SetLength(0);
+								
+								i?.MoveToContainer(box.inventory).ToString();
 							}
-							
-							if(Convert.ToBoolean(signData["locked"]))
-								sign.SetFlag(BaseEntity.Flags.Locked, true);
-							
-							sign.SendNetworkUpdate();
-						}
-
-						pastedEntities.Add(entity);
+						};
 					}
-				} catch(Exception e) {
-					PrintError(string.Format("Trying to paste {0} send this error: {1}", data["prefabname"].ToString(), e.Message));
+
+					var sign = entity.GetComponentInParent<Signage>();
+					
+					if(sign != null)
+					{
+						var signData = data["sign"] as Dictionary<string, object>;
+						
+						if(signData.ContainsKey("texture"))
+						{
+							var stream = new MemoryStream();
+							var stringSign = Convert.FromBase64String(signData["texture"].ToString());
+							stream.Write(stringSign, 0, stringSign.Length);
+							sign.textureID = FileStorage.server.Store(stream, FileStorage.Type.png, sign.net.ID);
+							stream.Position = 0;
+							stream.SetLength(0);
+						}
+						
+						if(Convert.ToBoolean(signData["locked"]))
+							sign.SetFlag(BaseEntity.Flags.Locked, true);
+						
+						sign.SendNetworkUpdate();
+					}
+
+					pastedEntities.Add(entity);
 				}
 			}
+			
 			return pastedEntities;
 		}
 
@@ -619,70 +605,55 @@ namespace Oxide.Plugins
 		private object TryCopy(Vector3 sourcePos, Vector3 sourceRot, string filename, float RotationCorrection, string[] args)
 		{
 			bool saveInventories = true, saveDeployables = true, saveBuilding = true;
-			CopyMechanics copyMechanics = CopyMechanics.Building;
+			CopyMechanics copyMechanics = CopyMechanics.Proximity;
 			float radius = 3f;
 			
 			for(int i = 0; ; i = i + 2)
-			{
+			{	
 				if(i >= args.Length)  
 					break;
 				
-				if(i+1 >= args.Length)
-				{
+				int valueIndex = i + 1;
+				
+				if(valueIndex >= args.Length)
 					return Lang("SYNTAX_COPY", null);
-				}
 				
 				switch(args[i].ToLower())
 				{
-					case "r":
-					case "rad":
-					case "radius":
-						if(!float.TryParse(args[i+1], out radius))
-						{
-							return "radius must be a number";
-						}
-						break;
-					case "mechanics":
-					case "m":
-					case "mecha":
-						switch(args[i+1].ToLower())
-						{
-							case "building":
-							case "build":
-							case "b":
-								copyMechanics = CopyMechanics.Building;
-								break;
-							case "proximity":
-							case "prox":
-							case "p":
-								copyMechanics = CopyMechanics.Proximity;
-								break;
-						}
-						break;
-					case "i":
-					case "inventories":
-					case "inv":
-						if(!bool.TryParse(args[i + 1], out saveInventories))
-						{
-							return "save inventories needs to be true or false";
-						}
-						break;
 					case "b":
-					case "building":
-					case "structure":
-						if(!bool.TryParse(args[i + 1], out saveBuilding))
-						{
-							return "save buildings needs to be true or false";
-						}
+					case "buildings":
+						if(!bool.TryParse(args[valueIndex], out saveBuilding))
+							return "save buildings must be true/false";
 						break;
 					case "d":
 					case "deployables":
-						if(!bool.TryParse(args[i + 1], out saveDeployables))
-						{
-							return "save deployables needs to be true or false";
-						}
+						if(!bool.TryParse(args[valueIndex], out saveDeployables))
+							return "save deployables must be true/false";
 						break;
-
+					case "i":
+					case "inventories":
+						if(!bool.TryParse(args[valueIndex], out saveInventories))
+							return "save inventories must be true/false";
+						break;
+					case "m":
+					case "method":
+						switch(args[valueIndex].ToLower())
+						{
+							case "b":
+							case "building":
+								copyMechanics = CopyMechanics.Building;
+								break;
+							case "p":
+							case "proximity":
+								copyMechanics = CopyMechanics.Proximity;
+								break;
+						}					
+						break;
+					case "r":
+					case "radius":
+						if(!float.TryParse(args[valueIndex], out radius))
+							return "radius must be a number";
+						break;
 					default:
 						return Lang("SYNTAX_COPY", null);
 						break;
@@ -719,81 +690,74 @@ namespace Oxide.Plugins
 
 		private object TryPaste(Vector3 startPos, string filename, BasePlayer player, float RotationCorrection, string[] args)
 		{
-			var steamid = player == null ? null : player.UserIDString;
+			var userID = player == null ? null : player.UserIDString;
 
 			string path = subDirectory + filename;
 
 			if(!dataSystem.ExistsDatafile(path)) 
 			{
-				return Lang("FILE_NOT_EXISTS", steamid);
+				return Lang("FILE_NOT_EXISTS", userID);
 			}
 
 			var data = dataSystem.GetDatafile(path);
 
 			if(data["default"] == null || data["entities"] == null)
 			{
-				return Lang("FILE_EMPTY", steamid);
+				return Lang("FILE_EMPTY", userID);
 			}
 
 			float heightAdj = 0f, blockCollision = 0f;
-			bool checkPlaced = false, autoHeight = false, inventories = true, deployables = true;
+			bool autoHeight = false, inventories = true, deployables = true;
 
 			for(int i = 0; ; i = i + 2)
 			{
 				if(i >= args.Length) 
 					break;
 				
-				if(i + 1 >= args.Length)
-				{
-					return Lang("SYNTAX_PASTE_OR_PASTEBACK", steamid);
-				}
+				int valueIndex = i + 1;
+				
+				if(valueIndex >= args.Length)
+					return Lang("SYNTAX_PASTE_OR_PASTEBACK", userID);
 				
 				switch(args[i].ToLower())
 				{
 					case "autoheight":
-						if(!bool.TryParse(args[i + 1], out autoHeight))
+						if(!bool.TryParse(args[valueIndex], out autoHeight))
 						{
-							return "autoheight must be true or false";
+							return "autoheight must be true/false";
 						}
 						
-						break;
-					case "height":
-						if(!float.TryParse(args[i + 1], out heightAdj))
-						{
-							return "height must be a number";
-						}
-						
-						break;
-					case "checkplaced":
-						if(!bool.TryParse(args[i + 1], out checkPlaced))
-						{
-							return "checkplaced must be true or false";
-						}
-
 						break;
 					case "blockcollision":
-						if(!float.TryParse(args[i + 1], out blockCollision))
+						if(!float.TryParse(args[valueIndex], out blockCollision))
 						{
 							return "blockcollision must be a number, 0 will deactivate the option";
 						}
 						
 						break;
 					case "deployables":
-						if(!bool.TryParse(args[i + 1], out deployables))
+						if(!bool.TryParse(args[valueIndex], out deployables))
 						{
-							return "deployables must be true or false";
+							return "deployables must be true/false";
 						}
 
 						break;
-					case "inventories":
-						if(!bool.TryParse(args[i + 1], out inventories))
+					case "height":
+						if(!float.TryParse(args[valueIndex], out heightAdj))
 						{
-							return "inventories must be true or false";
+							return "height must be a number";
+						}
+						
+						break;
+					case "inventories":
+						if(!bool.TryParse(args[valueIndex], out inventories))
+						{
+							return "inventories must be true/false";
 						}
 						
 						break;
 					default:
-						return Lang("SYNTAX_PASTE_OR_PASTEBACK", steamid);
+						return Lang("SYNTAX_PASTE_OR_PASTEBACK", userID);
 						break;
 				}
 			}
@@ -831,7 +795,7 @@ namespace Oxide.Plugins
 				}
 			}
 
-			return Paste(preloadData, startPos, player, checkPlaced);
+			return Paste(preloadData, startPos, player);
 		}
 
 		private void TryPasteLock(BaseEntity lockableEntity, Dictionary<string, object> structure)
@@ -1025,24 +989,24 @@ namespace Oxide.Plugins
 		//Console commands
 
 		[ConsoleCommand("pasteback")]
-        private void cmdConsolePasteBack(ConsoleSystem.Arg arg)
-        {	
+		private void cmdConsolePasteBack(ConsoleSystem.Arg arg)
+		{	
 			BasePlayer player = arg.Player();
-			
-            if(player == null)
+
+			if(player == null)
 				return;
-			
+
 			cmdChatPasteBack(player, arg.cmd.Name, arg.Args); 		
 		}
 		
 		[ConsoleCommand("undo")]
-        private void cmdConsoleUndo(ConsoleSystem.Arg arg)
-        {		
+		private void cmdConsoleUndo(ConsoleSystem.Arg arg)
+		{		
 			BasePlayer player = arg.Player();
-			
-            if(player == null)
+
+			if(player == null)
 				return;
-			
+
 			cmdChatUndo(player, arg.cmd.Name, arg.Args); 
 		} 
 		
@@ -1063,12 +1027,12 @@ namespace Oxide.Plugins
 				{"ru", "У вас нет прав доступа к данной команде"},
 			}},			
 			{"SYNTAX_PASTEBACK", new Dictionary<string, string>() {
-				{"en", "Syntax: /placeback TARGETFILENAME options values\nheight XX - Adjust the height\ncheckplaced true/false - checks if parts of the house are already placed or not, if they are already placed, the building part will be removed"},
-				{"ru", "Синтаксис: /placeback НАЗВАНИЕОБЪЕКТА опция значение\nheight XX - Высота от земли\ncheckplaced true/false - если часть здания уже вставлена, то объект будет пропущен"},
+				{"en", "Syntax: /placeback TARGETFILENAME options values\nheight XX - Adjust the height"},
+				{"ru", "Синтаксис: /placeback НАЗВАНИЕОБЪЕКТА опция значение\nheight XX - Высота от земли"},
 			}},		
 			{"SYNTAX_PASTE_OR_PASTEBACK", new Dictionary<string, string>() {
-				{"en", "Syntax: /paste or /placeback TARGETFILENAME options values\nheight XX - Adjust the height\nautoheight true/false - sets best height, carefull of the steep\ncheckplaced true/false - checks if parts of the house are already placed or not, if they are already placed, the building part will be removed\nblockcollision XX - blocks the entire paste if something the new building collides with something\ndeployables true/false - false to remove deployables\ninventories true/false - false to ignore inventories"},
-				{"ru", "Синтаксис: /paste or /placeback НАЗВАНИЕОБЪЕКТА опция значение\nheight XX - Высота от земли\nautoheight true/false - автоматически подобрать высоту от земли\ncheckplaced true/false - если часть здания уже вставлена, то объект будет пропущен\nblockcollision XX - блокировать вставку, если что-то этому мешает\ndeployables true/false - false для удаления предметов\ninventories true/false - false для игнорирования копирования инвентаря"},
+				{"en", "Syntax: /paste or /placeback TARGETFILENAME options values\nheight XX - Adjust the height\nautoheight true/false - sets best height, carefull of the steep\nblockcollision XX - blocks the entire paste if something the new building collides with something\ndeployables true/false - false to remove deployables\ninventories true/false - false to ignore inventories"},
+				{"ru", "Синтаксис: /paste or /placeback НАЗВАНИЕОБЪЕКТА опция значение\nheight XX - Высота от земли\nautoheight true/false - автоматически подобрать высоту от земли\nblockcollision XX - блокировать вставку, если что-то этому мешает\ndeployables true/false - false для удаления предметов\ninventories true/false - false для игнорирования копирования инвентаря"},
 			}},		
 			{"PASTEBACK_SUCCESS", new Dictionary<string, string>() {
 				{"en", "You've successfully placed back the structure"},
