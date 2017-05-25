@@ -8,7 +8,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-	[Info("Copy Paste", "Reneb", "3.2.0", ResourceId = 716)] 
+	[Info("Copy Paste", "Reneb", "3.2.1", ResourceId = 716)] 
 	[Description("Copy and paste your buildings to save them or move them")]
 
 	class CopyPaste : RustPlugin
@@ -318,7 +318,7 @@ namespace Oxide.Plugins
 
 		private object FindBestHeight(List<Dictionary<string,object>> entities, Vector3 startPos)
 		{
-			float minHeight = 0f, maxHeight = 0f;
+			float maxHeight = 0f;
 
 			foreach(var entity in entities)
 			{
@@ -332,15 +332,9 @@ namespace Oxide.Plugins
 						
 						if(height.y > maxHeight) 
 							maxHeight = height.y;
-						
-						if(height.y < minHeight) 
-							minHeight = height.y;
 					}
 				}
 			}
-
-			if(maxHeight - minHeight > 3f)
-				return Lang("GROUND_STEP", null);
 
 			maxHeight += 1f;
 
@@ -1048,15 +1042,11 @@ namespace Oxide.Plugins
 			{"SYNTAX_BUILDINGS", new Dictionary<string, string>() {
 				{"en", "Option buildings must be true/false"},
 				{"ru", "Опция buildings принимает значения true/false"},
-			}},			
-			{"GROUND_STEP", new Dictionary<string, string>() {
-				{"en", "The ground is too steep"},
-				{"ru", "Слишком крутая поверхность"},
-			}},			
+			}},		
 			{"BLOCKING_PASTE", new Dictionary<string, string>() {
 				{"en", "Something is blocking the paste"},
 				{"ru", "Что-то препятствует вставке"},
-			}},	
+			}},
 		};
 	}
 }
