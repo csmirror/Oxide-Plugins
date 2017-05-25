@@ -8,7 +8,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-	[Info("Copy Paste", "Reneb", "3.1.9", ResourceId = 716)] 
+	[Info("Copy Paste", "Reneb", "3.2.0", ResourceId = 716)] 
 	[Description("Copy and paste your buildings to save them or move them")]
 
 	class CopyPaste : RustPlugin
@@ -71,9 +71,7 @@ namespace Oxide.Plugins
 			Vector3 sourcePoint;
 
 			if(!FindRayEntity(player.eyes.position, ViewAngles * Vector3.forward, out sourcePoint, out sourceEntity, rayCopy))
-			{
 				return Lang("NO_ENTITY_RAY", player.UserIDString);
-			}
 
 			return TryCopy(sourcePoint, sourceEntity.transform.rotation.ToEulerAngles(), filename, ViewAngles.ToEulerAngles().y, args);
 		}
@@ -95,9 +93,7 @@ namespace Oxide.Plugins
 			Vector3 sourcePoint;
 
 			if(!FindRayEntity(player.eyes.position, ViewAngles * Vector3.forward, out sourcePoint, out sourceEntity, rayPaste)) 
-			{
 				return Lang("NO_ENTITY_RAY", player.UserIDString);
-			}
 
 			return TryPaste(sourcePoint, filename, player, ViewAngles.ToEulerAngles().y, args);
 		}
@@ -108,13 +104,8 @@ namespace Oxide.Plugins
 		{
 			foreach(var entityobj in entities)
 			{
-				var pos = (Vector3)entityobj["position"];
-				var rot = (Quaternion)entityobj["rotation"];
-
-				foreach(var collider in Physics.OverlapSphere(pos, radius, collisionLayer))
-				{
-					return string.Format("Something is blocking the paste ({0})", collider.gameObject.name);
-				}
+				if(Physics.CheckSphere((Vector3)entityobj["position"], radius, collisionLayer))
+					return Lang("BLOCKING_PASTE", null);
 			}
 			
 			return true;
@@ -348,8 +339,8 @@ namespace Oxide.Plugins
 				}
 			}
 
-			if(maxHeight - minHeight > 3f) 
-				return "The ground is too steep";
+			if(maxHeight - minHeight > 3f)
+				return Lang("GROUND_STEP", null);
 
 			maxHeight += 1f;
 
@@ -376,14 +367,10 @@ namespace Oxide.Plugins
 			RaycastHit hitInfo;
 
 			if(Physics.Raycast(pos, Vector3.up, out hitInfo, groundLayer))
-			{
 				return hitInfo.point;
-			}
 
 			if(Physics.Raycast(pos, Vector3.down, out hitInfo, groundLayer))
-			{
 				return hitInfo.point;
-			}
 
 			return null;
 		}
@@ -472,14 +459,10 @@ namespace Oxide.Plugins
 					var basecombat = entity.GetComponentInParent<BaseCombatEntity>();
 					
 					if(basecombat != null)
-					{
 						basecombat.ChangeHealth(basecombat.MaxHealth());
-					}
 
 					if(entity.HasSlot(BaseEntity.Slot.Lock))
-					{
 						TryPasteLock(entity, data);
-					}
 
 					var box = entity.GetComponentInParent<StorageContainer>();
 					
@@ -623,17 +606,20 @@ namespace Oxide.Plugins
 					case "b":
 					case "buildings":
 						if(!bool.TryParse(args[valueIndex], out saveBuilding))
-							return "save buildings must be true/false";
+							return Lang("SYNTAX_BUILDINGS", null);
+						
 						break;
 					case "d":
 					case "deployables":
 						if(!bool.TryParse(args[valueIndex], out saveDeployables))
-							return "save deployables must be true/false";
+							return Lang("SYNTAX_DEPLOYABLES", null);
+						
 						break;
 					case "i":
 					case "inventories":
 						if(!bool.TryParse(args[valueIndex], out saveInventories))
-							return "save inventories must be true/false";
+							return Lang("SYNTAX_INVENTORIES", null);
+						
 						break;
 					case "m":
 					case "method":
@@ -647,16 +633,17 @@ namespace Oxide.Plugins
 							case "proximity":
 								copyMechanics = CopyMechanics.Proximity;
 								break;
-						}					
+						}
+						
 						break;
 					case "r":
 					case "radius":
 						if(!float.TryParse(args[valueIndex], out radius))
-							return "radius must be a number";
+							return Lang("SYNTAX_RADIUS", null);
+						
 						break;
 					default:
 						return Lang("SYNTAX_COPY", null);
-						break;
 				}
 			}
 
@@ -688,26 +675,22 @@ namespace Oxide.Plugins
 			}
 		}
 
-		private object TryPaste(Vector3 startPos, string filename, BasePlayer player, float RotationCorrection, string[] args)
+		private object TryPaste(Vector3 startPos, string filename, BasePlayer player, float RotationCorrection, string[] args, bool autoHeight = true)
 		{
-			var userID = player == null ? null : player.UserIDString;
+			var userID = player?.UserIDString;
 
 			string path = subDirectory + filename;
 
 			if(!dataSystem.ExistsDatafile(path)) 
-			{
 				return Lang("FILE_NOT_EXISTS", userID);
-			}
 
 			var data = dataSystem.GetDatafile(path);
 
 			if(data["default"] == null || data["entities"] == null)
-			{
-				return Lang("FILE_EMPTY", userID);
-			}
+				return Lang("FILE_BROKEN", userID);
 
 			float heightAdj = 0f, blockCollision = 0f;
-			bool autoHeight = true, inventories = true, deployables = true;
+			bool  inventories = true, deployables = true;
 
 			for(int i = 0; ; i = i + 2)
 			{
@@ -723,37 +706,28 @@ namespace Oxide.Plugins
 				{
 					case "blockcollision":
 						if(!float.TryParse(args[valueIndex], out blockCollision))
-						{
-							return "blockcollision must be a number, 0 will deactivate the option";
-						}
+							return Lang("SYNTAX_BLOCKCOLLISION", userID);
 						
 						break;
 					case "deployables":
 						if(!bool.TryParse(args[valueIndex], out deployables))
-						{
-							return "deployables must be true/false";
-						}
+							return Lang("SYNTAX_DEPLOYABLES", userID);
 
 						break;
 					case "height":
 						if(!float.TryParse(args[valueIndex], out heightAdj))
-						{
-							return "height must be a number";
-						}
+							return Lang("SYNTAX_HEIGHT", userID);
 						
 						autoHeight = false;
 						
 						break;
 					case "inventories":
 						if(!bool.TryParse(args[valueIndex], out inventories))
-						{
-							return "inventories must be true/false";
-						}
+							return Lang("SYNTAX_INVENTORIES", userID);
 						
 						break;
 					default:
 						return Lang("SYNTAX_PASTE_OR_PASTEBACK", userID);
-						break;
 				}
 			}
 
@@ -766,9 +740,7 @@ namespace Oxide.Plugins
 				var bestHeight = FindBestHeight(preloadData, startPos);
 				
 				if(bestHeight is string)
-				{
 					return bestHeight;
-				}
 				
 				heightAdj = (float)bestHeight - startPos.y;
 
@@ -785,9 +757,7 @@ namespace Oxide.Plugins
 				var collision = CheckCollision(preloadData, startPos, blockCollision);
 				
 				if(collision is string)
-				{
 					return collision;
-				}
 			}
 
 			return Paste(preloadData, startPos, player);
@@ -841,23 +811,19 @@ namespace Oxide.Plugins
 			string path = subDirectory + filename;
 
 			if(!dataSystem.ExistsDatafile(path)) 
-			{
 				return Lang("FILE_NOT_EXISTS", player.UserIDString);
-			}
 
 			var data = dataSystem.GetDatafile(path);
 
 			if(data["default"] == null || data["entities"] == null)
-			{
-				return Lang("FILE_EMPTY", player.UserIDString);
-			}
+				return Lang("FILE_BROKEN", player.UserIDString);
 
 			var defaultdata = data["default"] as Dictionary<string, object>;
 			var pos = defaultdata["position"] as Dictionary<string, object>;
+			var rotationCorrection = Convert.ToSingle(defaultdata["rotationdiff"]);
 			var startPos = new Vector3(Convert.ToSingle(pos["x"]), Convert.ToSingle(pos["y"]), Convert.ToSingle(pos["z"]));
-			var RotationCorrection = Convert.ToSingle(defaultdata["rotationdiff"]);
 
-			return TryPaste(startPos, filename, player, RotationCorrection, args);
+			return TryPaste(startPos, filename, player, rotationCorrection, args, autoHeight: false);
 		}
 
 		//Сhat commands
@@ -904,8 +870,7 @@ namespace Oxide.Plugins
 				return; 
 			}
 
-			var loadname = args[0];
-			var success = TryPasteFromSteamID(player.userID, loadname, args.Skip(1).ToArray());
+			var success = TryPasteFromSteamID(player.userID, args[0], args.Skip(1).ToArray());
 
 			if(success is string)
 			{
@@ -935,9 +900,8 @@ namespace Oxide.Plugins
 				SendReply(player, Lang("SYNTAX_PASTEBACK", player.UserIDString)); 
 				return; 
 			}
-
-			var loadname = args[0];
-			var success = TryPlaceback(loadname, player, args.Skip(1).ToArray());
+			
+			var success = TryPlaceback(args[0], player, args.Skip(1).ToArray());
 
 			if(success is string)
 			{
@@ -1004,7 +968,7 @@ namespace Oxide.Plugins
 
 			cmdChatUndo(player, arg.cmd.Name, arg.Args); 
 		} 
-		
+		 
 		//Languages phrases 
 
 		private readonly Dictionary<string, Dictionary<string, string>> messages = new Dictionary<string, Dictionary<string, string>> 
@@ -1013,9 +977,9 @@ namespace Oxide.Plugins
 				{"en", "File does not exist"},
 				{"ru", "Файл не существует"},
 			}},			
-			{"FILE_EMPTY", new Dictionary<string, string>() {
-				{"en", "File is empty"},
-				{"ru", "Файл пустой"},
+			{"FILE_BROKEN", new Dictionary<string, string>() {
+				{"en", "File is broken, can not be paste"},
+				{"ru", "Файл поврежден, вставка невозможна"},
 			}},	
 			{"NO_ACCESS", new Dictionary<string, string>() {
 				{"en", "You don't have the permissions to use this command"},
@@ -1060,7 +1024,39 @@ namespace Oxide.Plugins
 			{"NOT_FOUND_PLAYER", new Dictionary<string, string>() {
 				{"en", "Couldn't find the player"},
 				{"ru", "Не удалось найти игрока"},
-			}}	
+			}},
+			{"SYNTAX_INVENTORIES", new Dictionary<string, string>() {
+				{"en", "Option inventories must be true/false"},
+				{"ru", "Опция inventories принимает значения true/false"},
+			}},			
+			{"SYNTAX_HEIGHT", new Dictionary<string, string>() {
+				{"en", "Option height must be a number"},
+				{"ru", "Опция height принимает только числовые значения"},
+			}},			
+			{"SYNTAX_DEPLOYABLES", new Dictionary<string, string>() {
+				{"en", "Option deployables must be true/false"},
+				{"ru", "Опция deployables принимает значения true/false"},
+			}},			
+			{"SYNTAX_BLOCKCOLLISION", new Dictionary<string, string>() {
+				{"en", "Option blockcollision must be a number, 0 will deactivate the option"},
+				{"ru", "Опция blockcollision принимает только числовые значения, 0 позволяет отключить проверку"},
+			}},			
+			{"SYNTAX_RADIUS", new Dictionary<string, string>() {
+				{"en", "Option radius must be a number"},
+				{"ru", "Опция radius принимает только числовые значения"},
+			}},			
+			{"SYNTAX_BUILDINGS", new Dictionary<string, string>() {
+				{"en", "Option buildings must be true/false"},
+				{"ru", "Опция buildings принимает значения true/false"},
+			}},			
+			{"GROUND_STEP", new Dictionary<string, string>() {
+				{"en", "The ground is too steep"},
+				{"ru", "Слишком крутая поверхность"},
+			}},			
+			{"BLOCKING_PASTE", new Dictionary<string, string>() {
+				{"en", "Something is blocking the paste"},
+				{"ru", "Что-то препятствует вставке"},
+			}},	
 		};
 	}
 }
