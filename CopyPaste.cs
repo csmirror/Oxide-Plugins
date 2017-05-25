@@ -8,7 +8,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-	[Info("Copy Paste", "Reneb", "3.1.8", ResourceId = 716)] 
+	[Info("Copy Paste", "Reneb", "3.1.9", ResourceId = 716)] 
 	[Description("Copy and paste your buildings to save them or move them")]
 
 	class CopyPaste : RustPlugin
@@ -707,7 +707,7 @@ namespace Oxide.Plugins
 			}
 
 			float heightAdj = 0f, blockCollision = 0f;
-			bool autoHeight = false, inventories = true, deployables = true;
+			bool autoHeight = true, inventories = true, deployables = true;
 
 			for(int i = 0; ; i = i + 2)
 			{
@@ -721,13 +721,6 @@ namespace Oxide.Plugins
 				
 				switch(args[i].ToLower())
 				{
-					case "autoheight":
-						if(!bool.TryParse(args[valueIndex], out autoHeight))
-						{
-							return "autoheight must be true/false";
-						}
-						
-						break;
 					case "blockcollision":
 						if(!float.TryParse(args[valueIndex], out blockCollision))
 						{
@@ -747,6 +740,8 @@ namespace Oxide.Plugins
 						{
 							return "height must be a number";
 						}
+						
+						autoHeight = false;
 						
 						break;
 					case "inventories":
