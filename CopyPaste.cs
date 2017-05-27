@@ -8,7 +8,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-	[Info("Copy Paste", "Reneb", "3.2.1", ResourceId = 716)] 
+	[Info("Copy Paste", "Reneb", "3.2.2", ResourceId = 716)] 
 	[Description("Copy and paste your buildings to save them or move them")]
 
 	class CopyPaste : RustPlugin
@@ -521,7 +521,7 @@ namespace Oxide.Plugins
 
 					var sign = entity.GetComponentInParent<Signage>();
 					
-					if(sign != null)
+					if(sign != null && data.ContainsKey("sign"))
 					{
 						var signData = data["sign"] as Dictionary<string, object>;
 						
