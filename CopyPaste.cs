@@ -8,7 +8,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-	[Info("Copy Paste", "Reneb", "3.2.2", ResourceId = 716)] 
+	[Info("Copy Paste", "Reneb", "3.2.3", ResourceId = 716)] 
 	[Description("Copy and paste your buildings to save them or move them")]
 
 	class CopyPaste : RustPlugin
@@ -19,11 +19,12 @@ namespace Oxide.Plugins
 		private int rayCopy 		= LayerMask.GetMask("Construction", "Deployed", "Tree", "Resource", "Prevent Building");
 		private int rayPaste 		= LayerMask.GetMask("Construction", "Deployed", "Tree", "Terrain", "World", "Water", "Prevent Building");
 		
-		private string copyPermission = "copypaste.copy";
-		private string pastePermission = "copypaste.paste";
-		private string undoPermission = "copypaste.undo";
-		private string subDirectory = "copypaste/";
-
+		private string copyPermission	= "copypaste.copy";
+		private string pastePermission	= "copypaste.paste";
+		private string undoPermission	= "copypaste.undo";
+		private string serverID			= "Server";
+		private string subDirectory		= "copypaste/";	
+		
 		private Dictionary<string, List<BaseEntity>> lastPastes = new Dictionary<string, List<BaseEntity>>();
 
 		private DataFileSystem dataSystem = Interface.Oxide.DataFileSystem;
@@ -110,7 +111,43 @@ namespace Oxide.Plugins
 			
 			return true;
 		}
+		
+		private object cmdPasteBack(BasePlayer player, string[] args)
+		{
+			string userIDString = (player == null) ? serverID : player.UserIDString;
+			
+			if(args.Length < 1) 
+				return Lang("SYNTAX_PASTEBACK", userIDString);
+			
+			var success = TryPlaceback(args[0], player, args.Skip(1).ToArray());
 
+			if(success is string)
+				return (string)success;
+
+			lastPastes.Remove(userIDString);
+			lastPastes.Add(userIDString, (List<BaseEntity>)success);
+
+			return true;
+		}
+		
+		private object cmdUndo(string userIDString, string[] args)
+		{
+			if(!lastPastes.ContainsKey(userIDString)) 
+				return Lang("NO_PASTED_STRUCTURE", userIDString); 
+
+			foreach(var entity in lastPastes[userIDString])
+			{
+				if(entity == null || entity.IsDestroyed) 
+					continue;
+				
+				entity.Kill();
+			}
+
+			lastPastes.Remove(userIDString);
+
+			return true;
+		}
+		
 		private object Copy(Vector3 sourcePos, Vector3 sourceRot, string filename, float RotationCorrection, CopyMechanics copyMechanics, float range, bool saveBuildings, bool saveDeployables, bool saveInventories)
 		{
 			var rawData = new List<object>();
@@ -429,7 +466,9 @@ namespace Oxide.Plugins
 				{
 					entity.transform.position = pos;
 					entity.transform.rotation = rot;
-					entity.SendMessage("SetDeployedBy", player, SendMessageOptions.DontRequireReceiver);
+					
+					if(player != null)
+						entity.SendMessage("SetDeployedBy", player, SendMessageOptions.DontRequireReceiver);
 
 					var buildingblock = entity.GetComponentInParent<BuildingBlock>();
 					
@@ -805,12 +844,12 @@ namespace Oxide.Plugins
 			string path = subDirectory + filename;
 
 			if(!dataSystem.ExistsDatafile(path)) 
-				return Lang("FILE_NOT_EXISTS", player.UserIDString);
+				return Lang("FILE_NOT_EXISTS", player?.UserIDString);
 
 			var data = dataSystem.GetDatafile(path);
 
 			if(data["default"] == null || data["entities"] == null)
-				return Lang("FILE_BROKEN", player.UserIDString);
+				return Lang("FILE_BROKEN", player?.UserIDString);
 
 			var defaultdata = data["default"] as Dictionary<string, object>;
 			var pos = defaultdata["position"] as Dictionary<string, object>;
@@ -872,14 +911,12 @@ namespace Oxide.Plugins
 				return;
 			}
 
-			if(lastPastes.ContainsKey(player.UserIDString)) 
-				lastPastes.Remove(player.UserIDString);
-
+			lastPastes.Remove(player.UserIDString);
 			lastPastes.Add(player.UserIDString,(List<BaseEntity>)success);
 
 			SendReply(player, Lang("PASTE_SUCCESS", player.UserIDString));
 		}
-
+			
 		[ChatCommand("pasteback")]
 		private void cmdChatPasteBack(BasePlayer player, string command, string[] args)
 		{
@@ -889,26 +926,12 @@ namespace Oxide.Plugins
 				return; 
 			}
 
-			if(args.Length < 1)
-			{ 
-				SendReply(player, Lang("SYNTAX_PASTEBACK", player.UserIDString)); 
-				return; 
-			}
+			var result = cmdPasteBack(player, args);
 			
-			var success = TryPlaceback(args[0], player, args.Skip(1).ToArray());
-
-			if(success is string)
-			{
-				SendReply(player, (string)success);
-				return;
-			}
-
-			if(lastPastes.ContainsKey(player.UserIDString)) 
-				lastPastes.Remove(player.UserIDString);
-
-			lastPastes.Add(player.UserIDString, (List<BaseEntity>)success);
-
-			SendReply(player, Lang("PASTEBACK_SUCCESS", player.UserIDString));
+			if(result is string)
+				SendReply(player, (string)result);
+			else 
+				SendReply(player, Lang("PASTEBACK_SUCCESS", player.UserIDString));			
 		}
 
 		[ChatCommand("undo")]
@@ -919,48 +942,43 @@ namespace Oxide.Plugins
 				SendReply(player, Lang("NO_ACCESS", player.UserIDString));
 				return; 
 			}
-
-			if(!lastPastes.ContainsKey(player.UserIDString)) 
-			{ 
-				SendReply(player, Lang("NO_PASTED_STRUCTURE", player.UserIDString)); 
-				return; 
-			}
-
-			foreach(var entity in lastPastes[player.UserIDString])
-			{
-				if(entity == null || entity.IsDestroyed) 
-					continue;
-				
-				entity.Kill();
-			}
-
-			lastPastes.Remove(player.UserIDString);
-
-			SendReply(player, Lang("UNDO_SUCCESS", player.UserIDString));
+			
+			var result = cmdUndo(player.UserIDString, args);
+			
+			if(result is string)
+				SendReply(player, (string)result);
+			else 
+				SendReply(player, Lang("UNDO_SUCCESS", player.UserIDString));
 		}
 
-		//Console commands
+		//Console commands [From Server]
 
 		[ConsoleCommand("pasteback")]
 		private void cmdConsolePasteBack(ConsoleSystem.Arg arg)
-		{	
-			BasePlayer player = arg.Player();
-
-			if(player == null)
+		{
+			if(!arg.IsRcon)
 				return;
 
-			cmdChatPasteBack(player, arg.cmd.Name, arg.Args); 		
+			var result = cmdPasteBack(null, arg.Args);
+			
+			if(result is string)
+				SendReply(arg, (string)result);
+			else 
+				SendReply(arg, Lang("PASTEBACK_SUCCESS", null));			
 		}
 		
 		[ConsoleCommand("undo")]
 		private void cmdConsoleUndo(ConsoleSystem.Arg arg)
 		{		
-			BasePlayer player = arg.Player();
-
-			if(player == null)
+			if(!arg.IsRcon)
 				return;
-
-			cmdChatUndo(player, arg.cmd.Name, arg.Args); 
+			
+			var result = cmdUndo(serverID, arg.Args);
+			
+			if(result is string)
+				SendReply(arg, (string)result);
+			else 
+				SendReply(arg, Lang("UNDO_SUCCESS", null));
 		} 
 		 
 		//Languages phrases 
