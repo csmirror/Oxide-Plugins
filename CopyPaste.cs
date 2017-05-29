@@ -8,7 +8,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-	[Info("Copy Paste", "Reneb", "3.2.3", ResourceId = 716)] 
+	[Info("Copy Paste", "Reneb", "3.2.4", ResourceId = 716)] 
 	[Description("Copy and paste your buildings to save them or move them")]
 
 	class CopyPaste : RustPlugin
@@ -119,7 +119,7 @@ namespace Oxide.Plugins
 			if(args.Length < 1) 
 				return Lang("SYNTAX_PASTEBACK", userIDString);
 			
-			var success = TryPlaceback(args[0], player, args.Skip(1).ToArray());
+			var success = TryPasteBack(args[0], player, args.Skip(1).ToArray());
 
 			if(success is string)
 				return (string)success;
@@ -839,7 +839,7 @@ namespace Oxide.Plugins
 			}
 		}
 
-		private object TryPlaceback(string filename, BasePlayer player, string[] args)
+		private object TryPasteBack(string filename, BasePlayer player, string[] args)
 		{
 			string path = subDirectory + filename;
 
@@ -998,12 +998,12 @@ namespace Oxide.Plugins
 				{"ru", "У вас нет прав доступа к данной команде"},
 			}},			
 			{"SYNTAX_PASTEBACK", new Dictionary<string, string>() {
-				{"en", "Syntax: /placeback TARGETFILENAME options values\nheight XX - Adjust the height"},
-				{"ru", "Синтаксис: /placeback НАЗВАНИЕОБЪЕКТА опция значение\nheight XX - Высота от земли"},
+				{"en", "Syntax: /pasteback TARGETFILENAME options values\nheight XX - Adjust the height"},
+				{"ru", "Синтаксис: /pasteback НАЗВАНИЕОБЪЕКТА опция значение\nheight XX - Высота от земли"},
 			}},		
 			{"SYNTAX_PASTE_OR_PASTEBACK", new Dictionary<string, string>() {
-				{"en", "Syntax: /paste or /placeback TARGETFILENAME options values\nheight XX - Adjust the height\nautoheight true/false - sets best height, carefull of the steep\nblockcollision XX - blocks the entire paste if something the new building collides with something\ndeployables true/false - false to remove deployables\ninventories true/false - false to ignore inventories"},
-				{"ru", "Синтаксис: /paste or /placeback НАЗВАНИЕОБЪЕКТА опция значение\nheight XX - Высота от земли\nautoheight true/false - автоматически подобрать высоту от земли\nblockcollision XX - блокировать вставку, если что-то этому мешает\ndeployables true/false - false для удаления предметов\ninventories true/false - false для игнорирования копирования инвентаря"},
+				{"en", "Syntax: /paste or /pasteback TARGETFILENAME options values\nheight XX - Adjust the height\nautoheight true/false - sets best height, carefull of the steep\nblockcollision XX - blocks the entire paste if something the new building collides with something\ndeployables true/false - false to remove deployables\ninventories true/false - false to ignore inventories"},
+				{"ru", "Синтаксис: /paste or /pasteback НАЗВАНИЕОБЪЕКТА опция значение\nheight XX - Высота от земли\nautoheight true/false - автоматически подобрать высоту от земли\nblockcollision XX - блокировать вставку, если что-то этому мешает\ndeployables true/false - false для удаления предметов\ninventories true/false - false для игнорирования копирования инвентаря"},
 			}},		
 			{"PASTEBACK_SUCCESS", new Dictionary<string, string>() {
 				{"en", "You've successfully placed back the structure"},
