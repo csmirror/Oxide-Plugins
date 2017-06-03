@@ -1,5 +1,6 @@
 ﻿using Facepunch;
 using Oxide.Core;
+using ProtoBuf;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -8,7 +9,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-	[Info("Copy Paste", "Reneb", "3.2.5", ResourceId = 716)] 
+	[Info("Copy Paste", "Reneb", "3.2.6", ResourceId = 716)]
 	[Description("Copy and paste your buildings to save them or move them")]
 
 	class CopyPaste : RustPlugin
@@ -26,7 +27,7 @@ namespace Oxide.Plugins
 		private string subDirectory		= "copypaste/";	
 		
 		private Dictionary<string, List<BaseEntity>> lastPastes = new Dictionary<string, List<BaseEntity>>();
-		
+
 		private List<BaseEntity.Slot> checkSlots = new List<BaseEntity.Slot>() 
 		{ 
 			BaseEntity.Slot.Lock, 
@@ -34,7 +35,7 @@ namespace Oxide.Plugins
 			BaseEntity.Slot.MiddleModifier, 
 			BaseEntity.Slot.LowerModifier 
 		};
-		
+
 		private DataFileSystem dataSystem = Interface.Oxide.DataFileSystem;
 
 		private enum CopyMechanics { Building, Proximity }
@@ -271,12 +272,8 @@ namespace Oxide.Plugins
 					}
 				}
 			};
-	
-			foreach(BaseEntity.Slot slot in checkSlots)
-			{
-				if(entity.HasSlot(slot))
-					TryCopySlot(entity, data, slot);			
-			}
+
+			TryCopySlots(entity, data);			
 			
 			var buildingblock = entity.GetComponentInParent<BuildingBlock>();
 
@@ -589,6 +586,23 @@ namespace Oxide.Plugins
 						
 						sign.SendNetworkUpdate();
 					}
+					
+					if(data.ContainsKey("auth") && player != null)
+					{
+						if(entity is BuildingPrivlidge)
+						{
+							var toolcupboard = entity as BuildingPrivlidge;
+							
+							toolcupboard.authorizedPlayers.Add(new PlayerNameID()
+							{
+								userid = player.userID,
+								username = player.displayName
+							});
+							
+							//toolcupboard.UpdateAllPlayers();
+							toolcupboard.SendNetworkUpdate(BasePlayer.NetworkQueue.Update);
+						}
+					}
 
 					pastedEntities.Add(entity);
 				}
@@ -597,7 +611,7 @@ namespace Oxide.Plugins
 			return pastedEntities;
 		}
 
-		private List<Dictionary<string, object>> PreLoadData(List<object> entities, Vector3 startPos, float RotationCorrection, bool deployables, bool inventories)
+		private List<Dictionary<string, object>> PreLoadData(List<object> entities, Vector3 startPos, float RotationCorrection, bool deployables, bool inventories, bool auth)
 		{
 			var eulerRotation = new Vector3(0f, RotationCorrection, 0f);
 			var quaternionRotation = Quaternion.EulerRotation(eulerRotation);
@@ -621,6 +635,9 @@ namespace Oxide.Plugins
 				
 				if(!inventories && data.ContainsKey("items")) 
 					data["items"] = new List<object>();
+				
+				if(auth && data["prefabname"].ToString().Contains("cupboard.tool"))
+					data["auth"] = true;
 				
 				preloaddata.Add(data);
 			}
@@ -693,31 +710,40 @@ namespace Oxide.Plugins
 			return Copy(sourcePos, sourceRot, filename, RotationCorrection, copyMechanics, radius, saveBuilding, saveDeployables, saveInventories);
 		}
 		
-		private void TryCopySlot(BaseEntity ent, IDictionary<string, object> housedata, BaseEntity.Slot slot)
+		private void TryCopySlots(BaseEntity ent, IDictionary<string, object> housedata)
 		{
-			var slotentity = ent.GetSlot(slot);
-
-			if(slotentity != null)
+			foreach(BaseEntity.Slot slot in checkSlots)
 			{
+				if(!ent.HasSlot(slot))
+					continue;			
+			
+				var slotEntity = ent.GetSlot(slot);
+
+				if(slotEntity == null)
+					continue;
+					
 				var codedata = new Dictionary<string, object>
 				{
-					{"prefabname", slotentity.PrefabName}
+					{"prefabname", slotEntity.PrefabName}
 				};
 
-				if(slotentity.GetComponent<CodeLock>())
+				if(slotEntity.GetComponent<CodeLock>())
 				{
-					codedata.Add("code", slotentity.GetComponent<CodeLock>().code.ToString());
-				} else if(slotentity.GetComponent<KeyLock>()) {
-					var @lock = slotentity.GetComponent<KeyLock>();
+					codedata.Add("code", slotEntity.GetComponent<CodeLock>().code.ToString());
+				} else if(slotEntity.GetComponent<KeyLock>()) {
+					var @lock = slotEntity.GetComponent<KeyLock>();
 					var code = @lock.keyCode;
-					if(@lock.firstKeyCreated) code |= 0x80;
+					
+					if(@lock.firstKeyCreated) 
+						code |= 0x80;
+					
 					codedata.Add("code", code.ToString());
 				}
 				
 				string slotName = slot.ToString().ToLower();
 				
 				housedata.Add(slotName, codedata);
-			}
+			}		
 		}
 		
 		private object TryPaste(Vector3 startPos, string filename, BasePlayer player, float RotationCorrection, string[] args, bool autoHeight = true)
@@ -735,7 +761,7 @@ namespace Oxide.Plugins
 				return Lang("FILE_BROKEN", userID);
 
 			float heightAdj = 0f, blockCollision = 0f;
-			bool  inventories = true, deployables = true;
+			bool  auth = false, inventories = true, deployables = true;
 
 			for(int i = 0; ; i = i + 2)
 			{
@@ -749,11 +775,19 @@ namespace Oxide.Plugins
 				
 				switch(args[i].ToLower())
 				{
+					case "a":
+					case "auth":
+						if(!bool.TryParse(args[valueIndex], out auth))
+							return Lang("SYNTAX_AUTH", userID);
+						
+						break;
+					case "b":
 					case "blockcollision":
 						if(!float.TryParse(args[valueIndex], out blockCollision))
 							return Lang("SYNTAX_BLOCKCOLLISION", userID);
 						
 						break;
+					case "d":
 					case "deployables":
 						if(!bool.TryParse(args[valueIndex], out deployables))
 							return Lang("SYNTAX_DEPLOYABLES", userID);
@@ -766,6 +800,7 @@ namespace Oxide.Plugins
 						autoHeight = false;
 						
 						break;
+					case "i":
 					case "inventories":
 						if(!bool.TryParse(args[valueIndex], out inventories))
 							return Lang("SYNTAX_INVENTORIES", userID);
@@ -778,7 +813,7 @@ namespace Oxide.Plugins
 
 			startPos.y += heightAdj;
 
-			var preloadData = PreLoadData(data["entities"] as List<object>, startPos, RotationCorrection, deployables, inventories);
+			var preloadData = PreLoadData(data["entities"] as List<object>, startPos, RotationCorrection, deployables, inventories, auth);
 
 			if(autoHeight)
 			{
@@ -1055,6 +1090,10 @@ namespace Oxide.Plugins
 				{"en", "Couldn't find the player"},
 				{"ru", "Не удалось найти игрока"},
 			}},
+			{"SYNTAX_AUTH", new Dictionary<string, string>() {
+				{"en", "Option auth must be true/false"},
+				{"ru", "Опция auth принимает значения true/false"},
+			}},				
 			{"SYNTAX_INVENTORIES", new Dictionary<string, string>() {
 				{"en", "Option inventories must be true/false"},
 				{"ru", "Опция inventories принимает значения true/false"},
