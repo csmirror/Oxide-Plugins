@@ -8,7 +8,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-	[Info("Copy Paste", "Reneb", "3.2.4", ResourceId = 716)] 
+	[Info("Copy Paste", "Reneb", "3.2.5", ResourceId = 716)] 
 	[Description("Copy and paste your buildings to save them or move them")]
 
 	class CopyPaste : RustPlugin
@@ -26,11 +26,19 @@ namespace Oxide.Plugins
 		private string subDirectory		= "copypaste/";	
 		
 		private Dictionary<string, List<BaseEntity>> lastPastes = new Dictionary<string, List<BaseEntity>>();
-
+		
+		private List<BaseEntity.Slot> checkSlots = new List<BaseEntity.Slot>() 
+		{ 
+			BaseEntity.Slot.Lock, 
+			BaseEntity.Slot.UpperModifier, 
+			BaseEntity.Slot.MiddleModifier, 
+			BaseEntity.Slot.LowerModifier 
+		};
+		
 		private DataFileSystem dataSystem = Interface.Oxide.DataFileSystem;
 
 		private enum CopyMechanics { Building, Proximity }
-
+			
 		//Hooks
 
 		private void Init()
@@ -263,10 +271,13 @@ namespace Oxide.Plugins
 					}
 				}
 			};
-
-			if(entity.HasSlot(BaseEntity.Slot.Lock))
-				TryCopyLock(entity, data);
-
+	
+			foreach(BaseEntity.Slot slot in checkSlots)
+			{
+				if(entity.HasSlot(slot))
+					TryCopySlot(entity, data, slot);			
+			}
+			
 			var buildingblock = entity.GetComponentInParent<BuildingBlock>();
 
 			if(buildingblock != null )
@@ -494,8 +505,7 @@ namespace Oxide.Plugins
 					if(basecombat != null)
 						basecombat.ChangeHealth(basecombat.MaxHealth());
 
-					if(entity.HasSlot(BaseEntity.Slot.Lock))
-						TryPasteLock(entity, data);
+					TryPasteSlots(entity, data);					
 
 					var box = entity.GetComponentInParent<StorageContainer>();
 					
@@ -553,7 +563,7 @@ namespace Oxide.Plugins
 									}
 								}
 								
-								i?.MoveToContainer(box.inventory).ToString();
+								i?.MoveToContainer(box.inventory);
 							}
 						};
 					}
@@ -682,10 +692,10 @@ namespace Oxide.Plugins
 
 			return Copy(sourcePos, sourceRot, filename, RotationCorrection, copyMechanics, radius, saveBuilding, saveDeployables, saveInventories);
 		}
-				
-		private void TryCopyLock(BaseEntity lockableEntity, IDictionary<string, object> housedata)
+		
+		private void TryCopySlot(BaseEntity ent, IDictionary<string, object> housedata, BaseEntity.Slot slot)
 		{
-			var slotentity = lockableEntity.GetSlot(BaseEntity.Slot.Lock);
+			var slotentity = ent.GetSlot(slot);
 
 			if(slotentity != null)
 			{
@@ -704,10 +714,12 @@ namespace Oxide.Plugins
 					codedata.Add("code", code.ToString());
 				}
 				
-				housedata.Add("lock",codedata);
+				string slotName = slot.ToString().ToLower();
+				
+				housedata.Add(slotName, codedata);
 			}
 		}
-
+		
 		private object TryPaste(Vector3 startPos, string filename, BasePlayer player, float RotationCorrection, string[] args, bool autoHeight = true)
 		{
 			var userID = player?.UserIDString;
@@ -796,37 +808,43 @@ namespace Oxide.Plugins
 			return Paste(preloadData, startPos, player);
 		}
 
-		private void TryPasteLock(BaseEntity lockableEntity, Dictionary<string, object> structure)
+		private void TryPasteSlots(BaseEntity ent, Dictionary<string, object> structure)
 		{
-			BaseEntity lockentity = null;
-
-			if(structure.ContainsKey("lock"))
+			foreach(BaseEntity.Slot slot in checkSlots)
 			{
-				var lockdata = structure["lock"] as Dictionary<string, object>;
-				lockentity = GameManager.server.CreateEntity((string)lockdata["prefabname"], Vector3.zero, new Quaternion(), true);
+				string slotName = slot.ToString().ToLower();
 				
-				if(lockentity != null)
+				if(!ent.HasSlot(slot) || !structure.ContainsKey(slotName))
+					continue;
+
+				var slotData = structure[slotName] as Dictionary<string, object>;
+				BaseEntity slotEntity = GameManager.server.CreateEntity((string)slotData["prefabname"], Vector3.zero, new Quaternion(), true);
+				
+				if(slotEntity == null)
+					continue;
+				
+				slotEntity.gameObject.Identity();
+				slotEntity.SetParent(ent, slotName);
+				slotEntity.OnDeployed(ent);
+				slotEntity.Spawn();
+				
+				ent.SetSlot(slot, slotEntity);
+				
+				if(slotName == "lock" && slotData.ContainsKey("code"))
 				{
-					lockentity.gameObject.Identity();
-					lockentity.SetParent(lockableEntity, "lock");
-					lockentity.OnDeployed(lockableEntity);
-					lockentity.Spawn();
-					
-					lockableEntity.SetSlot(BaseEntity.Slot.Lock, lockentity);
-					
-					if(lockentity.GetComponent<CodeLock>())
+					if(slotEntity.GetComponent<CodeLock>())
 					{
-						var code = (string)lockdata["code"];
+						var code = (string)slotData["code"];
 						
 						if(!string.IsNullOrEmpty(code))
 						{
-							var @lock = lockentity.GetComponent<CodeLock>();
+							var @lock = slotEntity.GetComponent<CodeLock>();
 							@lock.code = code;
 							@lock.SetFlag(BaseEntity.Flags.Locked, true);
 						}
-					} else if(lockentity.GetComponent<KeyLock>()) {
-						var code = Convert.ToInt32(lockdata["code"]);
-						var @lock = lockentity.GetComponent<KeyLock>();
+					} else if(slotEntity.GetComponent<KeyLock>()) {
+						var code = Convert.ToInt32(slotData["code"]);
+						var @lock = slotEntity.GetComponent<KeyLock>();
 						
 						if((code & 0x80) != 0)
 						{
