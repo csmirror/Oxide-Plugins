@@ -9,13 +9,12 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-	[Info("Copy Paste", "Reneb", "3.2.6", ResourceId = 716)]
+	[Info("Copy Paste", "Reneb", "3.2.7", ResourceId = 716)]
 	[Description("Copy and paste your buildings to save them or move them")]
 
 	class CopyPaste : RustPlugin
 	{
-		private int copyLayer 		= LayerMask.GetMask("Construction", "Construction Trigger", "Trigger", "Deployed", "Tree", "AI");
-		private int collisionLayer 	= LayerMask.GetMask("Construction", "Construction Trigger", "Trigger", "Deployed", "Default");
+		private int copyLayer 		= LayerMask.GetMask("Construction", "Construction Trigger", "Trigger", "Deployed");
 		private int groundLayer 	= LayerMask.GetMask("Terrain", "Default");
 		private int rayCopy 		= LayerMask.GetMask("Construction", "Deployed", "Tree", "Resource", "Prevent Building");
 		private int rayPaste 		= LayerMask.GetMask("Construction", "Deployed", "Tree", "Terrain", "World", "Water", "Prevent Building");
@@ -114,7 +113,7 @@ namespace Oxide.Plugins
 		{
 			foreach(var entityobj in entities)
 			{
-				if(Physics.CheckSphere((Vector3)entityobj["position"], radius, collisionLayer))
+				if(Physics.CheckSphere((Vector3)entityobj["position"], radius, copyLayer))
 					return Lang("BLOCKING_PASTE", null);
 			}
 			
