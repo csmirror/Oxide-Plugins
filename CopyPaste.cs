@@ -1,5 +1,6 @@
 ﻿using Facepunch;
 using Oxide.Core;
+using Newtonsoft.Json;
 using ProtoBuf;
 using System;
 using System.Collections.Generic;
@@ -9,7 +10,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-	[Info("Copy Paste", "Reneb", "3.2.9", ResourceId = 716)]
+	[Info("Copy Paste", "Reneb", "3.3.2", ResourceId = 716)]
 	[Description("Copy and paste your buildings to save them or move them")]
 
 	class CopyPaste : RustPlugin
@@ -38,7 +39,80 @@ namespace Oxide.Plugins
 		private DataFileSystem dataSystem = Interface.Oxide.DataFileSystem;
 
 		private enum CopyMechanics { Building, Proximity }
+		
+		//Config
+		
+        private ConfigData config;
+		
+        class ConfigData
+        {
+            [JsonProperty(PropertyName = "Copy Options")]
+            public CopyOptions Copy { get; set; }
 			
+            [JsonProperty(PropertyName = "Paste Options")]
+            public PasteOptions Paste { get; set; }
+			
+            public class CopyOptions
+            {
+                [JsonProperty(PropertyName = "Buildings (true/false)")]
+                public bool Buildings { get; set; }
+
+                [JsonProperty(PropertyName = "Deployables (true/false)")]
+                public bool Deployables { get; set; }
+
+                [JsonProperty(PropertyName = "Inventories (true/false)")]
+                public bool Inventories { get; set; }
+
+                [JsonProperty(PropertyName = "Share (true/false)")]
+                public bool Share { get; set; }
+				
+                [JsonProperty(PropertyName = "Tree (true/false)")]
+                public bool Tree { get; set; }				
+            }
+			
+            public class PasteOptions
+            {
+                [JsonProperty(PropertyName = "Auth (true/false)")]
+                public bool Auth { get; set; }
+				
+                [JsonProperty(PropertyName = "Deployables (true/false)")]
+                public bool Deployables { get; set; }
+				
+                [JsonProperty(PropertyName = "Inventories (true/false)")]
+                public bool Inventories { get; set; }
+            }			
+        }
+		
+        private void LoadVariables()
+        {
+            config = Config.ReadObject<ConfigData>();
+			
+            SaveConfig();
+        }
+		
+        protected override void LoadDefaultConfig()
+        {
+            var configData = new ConfigData
+            {
+                Copy = new ConfigData.CopyOptions
+                {
+                    Buildings = true,
+                    Deployables = true,
+                    Inventories = true,
+                    Share = false,
+					Tree = false
+                },
+                Paste = new ConfigData.PasteOptions
+                {
+                    Auth = false,
+                    Deployables = true,
+                    Inventories = true
+                }
+            };
+			
+            Config.WriteObject(configData, true);
+        }
+		
 		//Hooks
 
 		private void Init()
@@ -66,6 +140,8 @@ namespace Oxide.Plugins
 			} 
 		}
 
+		private void OnServerInitialized() => LoadVariables();
+		
 		//API
 		
 		object TryCopyFromSteamID(ulong userID, string filename, string[] args)
@@ -132,8 +208,7 @@ namespace Oxide.Plugins
 			if(success is string)
 				return (string)success;
 
-			lastPastes.Remove(userIDString);
-			lastPastes.Add(userIDString, (List<BaseEntity>)success);
+			lastPastes[userIDString] = (List<BaseEntity>)success;
 
 			return true;
 		}
@@ -650,7 +725,7 @@ namespace Oxide.Plugins
 
 		private object TryCopy(Vector3 sourcePos, Vector3 sourceRot, string filename, float RotationCorrection, string[] args)
 		{
-			bool saveBuilding = true, saveDeployables = true, saveInventories = true, saveShare = false, saveTree = false;
+			bool saveBuildings = config.Copy.Buildings, saveDeployables = config.Copy.Deployables, saveInventories = config.Copy.Inventories, saveShare = config.Copy.Share, saveTree = config.Copy.Tree;
 			CopyMechanics copyMechanics = CopyMechanics.Proximity;
 			float radius = 3f;
 			
@@ -670,7 +745,7 @@ namespace Oxide.Plugins
 				{
 					case "b":
 					case "buildings":
-						if(!bool.TryParse(args[valueIndex], out saveBuilding))
+						if(!bool.TryParse(args[valueIndex], out saveBuildings))
 							return Lang("SYNTAX_BOOL", null, param);
 						
 						break;
@@ -724,7 +799,7 @@ namespace Oxide.Plugins
 				}
 			}
 
-			return Copy(sourcePos, sourceRot, filename, RotationCorrection, copyMechanics, radius, saveBuilding, saveDeployables, saveInventories, saveTree, saveShare);
+			return Copy(sourcePos, sourceRot, filename, RotationCorrection, copyMechanics, radius, saveBuildings, saveDeployables, saveInventories, saveTree, saveShare);
 		}
 		
 		private void TryCopySlots(BaseEntity ent, IDictionary<string, object> housedata, bool saveShare)
@@ -783,7 +858,7 @@ namespace Oxide.Plugins
 				return Lang("FILE_BROKEN", userID);
 
 			float heightAdj = 0f, blockCollision = 0f;
-			bool  auth = false, inventories = true, deployables = true;
+			bool  auth = config.Paste.Auth, inventories = config.Paste.Inventories, deployables = config.Paste.Deployables;
 
 			for(int i = 0; ; i = i + 2)
 			{
@@ -1083,12 +1158,12 @@ namespace Oxide.Plugins
 				{"ru", "У вас нет прав доступа к данной команде"},
 			}},			
 			{"SYNTAX_PASTEBACK", new Dictionary<string, string>() {
-				{"en", "Syntax: /pasteback TARGETFILENAME options values\nheight XX - Adjust the height"},
-				{"ru", "Синтаксис: /pasteback НАЗВАНИЕОБЪЕКТА опция значение\nheight XX - Высота от земли"},
+				{"en", "Syntax: /pasteback <Target Filename> <options values>\nheight XX - Adjust the height"},
+				{"ru", "Синтаксис: /pasteback <Название Объекта> <опция значение>\nheight XX - Высота от земли"},
 			}},		
 			{"SYNTAX_PASTE_OR_PASTEBACK", new Dictionary<string, string>() {
-				{"en", "Syntax: /paste or /pasteback TARGETFILENAME options values\nheight XX - Adjust the height\nautoheight true/false - sets best height, carefull of the steep\nblockcollision XX - blocks the entire paste if something the new building collides with something\ndeployables true/false - false to remove deployables\ninventories true/false - false to ignore inventories"},
-				{"ru", "Синтаксис: /paste or /pasteback НАЗВАНИЕОБЪЕКТА опция значение\nheight XX - Высота от земли\nautoheight true/false - автоматически подобрать высоту от земли\nblockcollision XX - блокировать вставку, если что-то этому мешает\ndeployables true/false - false для удаления предметов\ninventories true/false - false для игнорирования копирования инвентаря"},
+				{"en", "Syntax: /paste or /pasteback <Target Filename> <options values>\nheight XX - Adjust the height\nautoheight true/false - sets best height, carefull of the steep\nblockcollision XX - blocks the entire paste if something the new building collides with something\ndeployables true/false - false to remove deployables\ninventories true/false - false to ignore inventories"},
+				{"ru", "Синтаксис: /paste or /pasteback <Название Объекта> <опция значение>\nheight XX - Высота от земли\nautoheight true/false - автоматически подобрать высоту от земли\nblockcollision XX - блокировать вставку, если что-то этому мешает\ndeployables true/false - false для удаления предметов\ninventories true/false - false для игнорирования копирования инвентаря"},
 			}},		
 			{"PASTEBACK_SUCCESS", new Dictionary<string, string>() {
 				{"en", "You've successfully placed back the structure"},
@@ -1099,8 +1174,8 @@ namespace Oxide.Plugins
 				{"ru", "Постройка успешно вставлена"},
 			}},		
 			{"SYNTAX_COPY", new Dictionary<string, string>() {
-				{"en", "Syntax: /copy TARGETFILENAME options values\n radius XX (default 3)\n mechanics proximity/building (default building)\nbuilding true/false (saves structures or not)\ndeployables true/false (saves deployables or not)\ninventories true/false (saves inventories or not)"},
-				{"ru", "Синтаксис: /copy НАЗВАНИЕОБЪЕКТА опция значение\n radius XX (default 3)\n mechanics proximity/building (по умолчанию building)\nbuilding true/false (сохранять постройку или нет)\ndeployables true/false (сохранять предметы или нет)\ninventories true/false (сохранять инвентарь или нет)"},
+				{"en", "Syntax: /copy <Target Filename> <options values>\n radius XX (default 3)\n mechanics proximity/building (default building)\nbuilding true/false (saves structures or not)\ndeployables true/false (saves deployables or not)\ninventories true/false (saves inventories or not)"},
+				{"ru", "Синтаксис: /copy <Название Объекта> <опция значение>\n radius XX (default 3)\n mechanics proximity/building (по умолчанию building)\nbuilding true/false (сохранять постройку или нет)\ndeployables true/false (сохранять предметы или нет)\ninventories true/false (сохранять инвентарь или нет)"},
 			}},		
 			{"NO_ENTITY_RAY", new Dictionary<string, string>() {
 				{"en", "Couldn't ray something valid in front of you"},
@@ -1121,10 +1196,6 @@ namespace Oxide.Plugins
 			{"NOT_FOUND_PLAYER", new Dictionary<string, string>() {
 				{"en", "Couldn't find the player"},
 				{"ru", "Не удалось найти игрока"},
-			}},
-			{"SYNTAX_AUTH", new Dictionary<string, string>() {
-				{"en", "Option auth must be true/false"},
-				{"ru", "Опция auth принимает значения true/false"},
 			}},
 			{"SYNTAX_BOOL", new Dictionary<string, string>() {
 				{"en", "Option {0} must be true/false"},
