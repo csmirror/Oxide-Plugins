@@ -10,7 +10,11 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
+<<<<<<< HEAD
 	[Info("Copy Paste", "Reneb", "3.3.4", ResourceId = 716)]
+=======
+	[Info("Copy Paste", "Reneb", "3.3.3", ResourceId = 716)]
+>>>>>>> origin/master
 	[Description("Copy and paste your buildings to save them or move them")]
 
 	class CopyPaste : RustPlugin
