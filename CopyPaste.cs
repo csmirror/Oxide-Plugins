@@ -9,7 +9,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-	[Info("Copy Paste", "Reneb", "3.3.7", ResourceId = 716)]
+	[Info("Copy Paste", "Reneb", "3.3.8", ResourceId = 716)]
 	[Description("Copy and paste your buildings to save them or move them")]
 
 	class CopyPaste : RustPlugin
@@ -79,6 +79,9 @@ namespace Oxide.Plugins
 
 				[JsonProperty(PropertyName = "Inventories (true/false)")]
 				public bool Inventories { get; set; }
+				
+				[JsonProperty(PropertyName = "Vending Machines (true/false)")]
+				public bool VendingMachines { get; set; }				
 			}
 		}
 
@@ -105,7 +108,8 @@ namespace Oxide.Plugins
 				{
 					Auth = false,
 					Deployables = true,
-					Inventories = true
+					Inventories = true,
+					VendingMachines = false
 				}
 			};
 
@@ -459,6 +463,31 @@ namespace Oxide.Plugins
 				}
 			}
 
+			var vendingMachine = entity.GetComponentInParent<VendingMachine>();
+			
+			if(vendingMachine != null)
+			{				
+				var sellOrders = new List<object>();
+				
+				foreach(var vendItem in vendingMachine.sellOrders.sellOrders)
+				{
+					sellOrders.Add(new Dictionary<string, object>
+					{
+						{"itemToSellID", vendItem.itemToSellID },
+						{"itemToSellAmount", vendItem.itemToSellAmount },	
+						{"currencyID", vendItem.currencyID },	
+						{"currencyAmountPerItem", vendItem.currencyAmountPerItem },							
+					});					
+				}
+				
+				data.Add("vendingmachine", new Dictionary<string, object>
+				{
+					{"shopName", vendingMachine.shopName },
+					{"isBroadcasting", vendingMachine.IsBroadcasting() },
+					{"sellOrders", sellOrders}
+				});
+			}
+			
 			return data;
 		}
 
@@ -725,7 +754,35 @@ namespace Oxide.Plugins
 						//cupboard.UpdateAllPlayers();
 						cupboard.SendNetworkUpdate(BasePlayer.NetworkQueue.Update);
 					}
+					
+					var vendingMachine = entity.GetComponentInParent<VendingMachine>();
 
+					if(vendingMachine != null && data.ContainsKey("vendingmachine"))
+					{						
+						var vendingData = data["vendingmachine"] as Dictionary<string, object>;
+						
+						vendingMachine.shopName = vendingData["shopName"].ToString();
+						vendingMachine.SetFlag(BaseEntity.Flags.Reserved4, Convert.ToBoolean(vendingData["isBroadcasting"]));
+						
+						var sellOrders = vendingData["sellOrders"] as List<object>;
+
+						foreach(var orderPreInfo in sellOrders)
+						{				
+							var orderInfo = orderPreInfo as Dictionary<string, object>;
+							
+							vendingMachine.sellOrders.sellOrders.Add(new ProtoBuf.VendingMachine.SellOrder()
+							{
+								ShouldPool = false,
+								itemToSellID = Convert.ToInt32(orderInfo["itemToSellID"]),
+								itemToSellAmount = Convert.ToInt32(orderInfo["itemToSellAmount"]),
+								currencyID = Convert.ToInt32(orderInfo["currencyID"]),
+								currencyAmountPerItem = Convert.ToInt32(orderInfo["currencyAmountPerItem"])
+							});  
+						}	
+											
+						vendingMachine.FullUpdate();
+					}
+					
 					pastedEntities.Add(entity);
 				}
 			}
@@ -733,7 +790,7 @@ namespace Oxide.Plugins
 			return pastedEntities;
 		}
 
-		private List<Dictionary<string, object>> PreLoadData(List<object> entities, Vector3 startPos, float RotationCorrection, bool deployables, bool inventories, bool auth)
+		private List<Dictionary<string, object>> PreLoadData(List<object> entities, Vector3 startPos, float RotationCorrection, bool deployables, bool inventories, bool auth, bool vending)
 		{
 			var eulerRotation = new Vector3(0f, RotationCorrection, 0f);
 			var quaternionRotation = Quaternion.EulerRotation(eulerRotation);
@@ -761,6 +818,9 @@ namespace Oxide.Plugins
 				if(auth && data["prefabname"].ToString().Contains("cupboard.tool"))
 					data["auth"] = true;
 
+				if(!vending && data["prefabname"].ToString().Contains("vendingmachine"))
+					data.Remove("vendingmachine");
+				
 				preloaddata.Add(data);
 			}
 
@@ -902,7 +962,7 @@ namespace Oxide.Plugins
 				return Lang("FILE_BROKEN", userID);
 
 			float heightAdj = 0f, blockCollision = 0f;
-			bool  auth = config.Paste.Auth, inventories = config.Paste.Inventories, deployables = config.Paste.Deployables;
+			bool  auth = config.Paste.Auth, inventories = config.Paste.Inventories, deployables = config.Paste.Deployables, vending = config.Paste.VendingMachines;
 
 			for(int i = 0; ; i = i + 2)
 			{
@@ -949,6 +1009,12 @@ namespace Oxide.Plugins
 							return Lang("SYNTAX_BOOL", userID, param);
 
 						break;
+					case "v":
+					case "vending":
+						if(!bool.TryParse(args[valueIndex], out vending))
+							return Lang("SYNTAX_BOOL", userID, param);
+
+						break;						
 					default:
 						return Lang("SYNTAX_PASTE_OR_PASTEBACK", userID);
 				}
@@ -956,7 +1022,7 @@ namespace Oxide.Plugins
 
 			startPos.y += heightAdj;
 
-			var preloadData = PreLoadData(data["entities"] as List<object>, startPos, RotationCorrection, deployables, inventories, auth);
+			var preloadData = PreLoadData(data["entities"] as List<object>, startPos, RotationCorrection, deployables, inventories, auth, vending);
 
 			if(autoHeight)
 			{
@@ -1204,12 +1270,12 @@ namespace Oxide.Plugins
 				{"ru", "У вас нет прав доступа к данной команде"},
 			}},
 			{"SYNTAX_PASTEBACK", new Dictionary<string, string>() {
-				{"en", "Syntax: /pasteback <Target Filename> <options values>\nheight XX - Adjust the height"},
-				{"ru", "Синтаксис: /pasteback <Название Объекта> <опция значение>\nheight XX - Высота от земли"},
+				{"en", "Syntax: /pasteback <Target Filename> <options values>\nheight XX - Adjust the height\nvending - Information and sellings in vending machine"},
+				{"ru", "Синтаксис: /pasteback <Название Объекта> <опция значение>\nheight XX - Высота от земли\nvending - Информация и товары в торговом автомате"},
 			}},
 			{"SYNTAX_PASTE_OR_PASTEBACK", new Dictionary<string, string>() {
-				{"en", "Syntax: /paste or /pasteback <Target Filename> <options values>\nheight XX - Adjust the height\nautoheight true/false - sets best height, carefull of the steep\nblockcollision XX - blocks the entire paste if something the new building collides with something\ndeployables true/false - false to remove deployables\ninventories true/false - false to ignore inventories"},
-				{"ru", "Синтаксис: /paste or /pasteback <Название Объекта> <опция значение>\nheight XX - Высота от земли\nautoheight true/false - автоматически подобрать высоту от земли\nblockcollision XX - блокировать вставку, если что-то этому мешает\ndeployables true/false - false для удаления предметов\ninventories true/false - false для игнорирования копирования инвентаря"},
+				{"en", "Syntax: /paste or /pasteback <Target Filename> <options values>\nheight XX - Adjust the height\nautoheight true/false - sets best height, carefull of the steep\nblockcollision XX - blocks the entire paste if something the new building collides with something\ndeployables true/false - false to remove deployables\ninventories true/false - false to ignore inventories\nvending - Information and sellings in vending machine"},
+				{"ru", "Синтаксис: /paste or /pasteback <Название Объекта> <опция значение>\nheight XX - Высота от земли\nautoheight true/false - автоматически подобрать высоту от земли\nblockcollision XX - блокировать вставку, если что-то этому мешает\ndeployables true/false - false для удаления предметов\ninventories true/false - false для игнорирования копирования инвентаря\nvending - Информация и товары в торговом автомате"},
 			}},
 			{"PASTEBACK_SUCCESS", new Dictionary<string, string>() {
 				{"en", "You've successfully placed back the structure"},
