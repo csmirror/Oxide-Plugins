@@ -4,12 +4,13 @@ using Newtonsoft.Json;
 using ProtoBuf;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Linq;
 using UnityEngine;
 
 namespace Oxide.Plugins
 {
-	[Info("Copy Paste", "Reneb", "3.3.9", ResourceId = 716)]
+	[Info("Copy Paste", "Reneb", "3.4.0", ResourceId = 716)]
 	[Description("Copy and paste your buildings to save them or move them")]
 
 	class CopyPaste : RustPlugin
@@ -54,68 +55,66 @@ namespace Oxide.Plugins
 			public class CopyOptions
 			{
 				[JsonProperty(PropertyName = "Buildings (true/false)")]
+				[DefaultValue(true)]
 				public bool Buildings { get; set; }
 
 				[JsonProperty(PropertyName = "Deployables (true/false)")]
+				[DefaultValue(true)]
 				public bool Deployables { get; set; }
 
 				[JsonProperty(PropertyName = "Inventories (true/false)")]
+				[DefaultValue(true)]
 				public bool Inventories { get; set; }
 
 				[JsonProperty(PropertyName = "Share (true/false)")]
+				[DefaultValue(false)]
 				public bool Share { get; set; }
 
 				[JsonProperty(PropertyName = "Tree (true/false)")]
+				[DefaultValue(false)]
 				public bool Tree { get; set; }
 			}
 
 			public class PasteOptions
 			{
 				[JsonProperty(PropertyName = "Auth (true/false)")]
+				[DefaultValue(false)]
 				public bool Auth { get; set; }
 
 				[JsonProperty(PropertyName = "Deployables (true/false)")]
+				[DefaultValue(true)]
 				public bool Deployables { get; set; }
 
 				[JsonProperty(PropertyName = "Inventories (true/false)")]
+				[DefaultValue(true)]
 				public bool Inventories { get; set; }
 				
 				[JsonProperty(PropertyName = "Vending Machines (true/false)")]
+				[DefaultValue(true)]
 				public bool VendingMachines { get; set; }				
 			}
 		}
 
 		private void LoadVariables()
 		{
+			Config.Settings.DefaultValueHandling = DefaultValueHandling.Populate;
+			
 			config = Config.ReadObject<ConfigData>();
 
-			SaveConfig();
+			Config.WriteObject(config, true);
 		}
 
 		protected override void LoadDefaultConfig()
 		{
 			var configData = new ConfigData
 			{
-				Copy = new ConfigData.CopyOptions
-				{
-					Buildings = true,
-					Deployables = true,
-					Inventories = true,
-					Share = false,
-					Tree = false
-				},
-				Paste = new ConfigData.PasteOptions
-				{
-					Auth = false,
-					Deployables = true,
-					Inventories = true,
-					VendingMachines = false
-				}
+				Copy = new ConfigData.CopyOptions(),
+				Paste = new ConfigData.PasteOptions()
 			};
-
+			
 			Config.WriteObject(configData, true);
 		}
-
+		
 		//Hooks
 
 		private void Init()
