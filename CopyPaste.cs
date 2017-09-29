@@ -10,7 +10,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-	[Info("Copy Paste", "Reneb", "3.4.0", ResourceId = 716)]
+	[Info("Copy Paste", "Reneb", "3.4.1", ResourceId = 716)]
 	[Description("Copy and paste your buildings to save them or move them")]
 
 	class CopyPaste : RustPlugin
@@ -56,42 +56,42 @@ namespace Oxide.Plugins
 			{
 				[JsonProperty(PropertyName = "Buildings (true/false)")]
 				[DefaultValue(true)]
-				public bool Buildings { get; set; }
+				public bool Buildings { get; set; } = true;
 
 				[JsonProperty(PropertyName = "Deployables (true/false)")]
 				[DefaultValue(true)]
-				public bool Deployables { get; set; }
+				public bool Deployables { get; set; } = true;
 
 				[JsonProperty(PropertyName = "Inventories (true/false)")]
 				[DefaultValue(true)]
-				public bool Inventories { get; set; }
+				public bool Inventories { get; set; } = true;
 
 				[JsonProperty(PropertyName = "Share (true/false)")]
 				[DefaultValue(false)]
-				public bool Share { get; set; }
+				public bool Share { get; set; } = false;
 
 				[JsonProperty(PropertyName = "Tree (true/false)")]
 				[DefaultValue(false)]
-				public bool Tree { get; set; }
+				public bool Tree { get; set; } = false;
 			}
 
 			public class PasteOptions
 			{
 				[JsonProperty(PropertyName = "Auth (true/false)")]
 				[DefaultValue(false)]
-				public bool Auth { get; set; }
+				public bool Auth { get; set; } = false;
 
 				[JsonProperty(PropertyName = "Deployables (true/false)")]
 				[DefaultValue(true)]
-				public bool Deployables { get; set; }
+				public bool Deployables { get; set; } = true;
 
 				[JsonProperty(PropertyName = "Inventories (true/false)")]
 				[DefaultValue(true)]
-				public bool Inventories { get; set; }
+				public bool Inventories { get; set; } = true;
 				
 				[JsonProperty(PropertyName = "Vending Machines (true/false)")]
 				[DefaultValue(true)]
-				public bool VendingMachines { get; set; }				
+				public bool VendingMachines { get; set; } = true;				
 			}
 		}
 
