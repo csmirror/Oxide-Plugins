@@ -6,11 +6,12 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
+using System.Reflection;
 using UnityEngine;
 
 namespace Oxide.Plugins
 {
-	[Info("Copy Paste", "Reneb", "3.4.1", ResourceId = 716)]
+	[Info("Copy Paste", "Reneb", "3.4.3", ResourceId = 716)]
 	[Description("Copy and paste your buildings to save them or move them")]
 
 	class CopyPaste : RustPlugin
@@ -40,6 +41,8 @@ namespace Oxide.Plugins
 
 		private enum CopyMechanics { Building, Proximity }
 
+		FieldInfo _equippingActive = typeof(Locker).GetField("equippingActive", (BindingFlags.Instance | BindingFlags.NonPublic));
+		
 		//Config
 
 		private ConfigData config;
@@ -377,6 +380,7 @@ namespace Oxide.Plugins
 							{"id", item.info.itemid },
 							{"amount", item.amount },
 							{"skinid", item.skin },
+							{"position", item.position },
 						};
 
 						var heldEnt = item.GetHeldEntity();
@@ -639,7 +643,12 @@ namespace Oxide.Plugins
 					var box = entity.GetComponentInParent<StorageContainer>();
 
 					if(box != null)
-					{
+					{				
+						Locker locker = box as Locker;
+						
+						if(locker != null)
+							_equippingActive.SetValue(locker, true);
+						
 						box.inventory.Clear();
 						var items = data["items"] as List<object>;
 						var itemlist = new List<ItemAmount>();
@@ -692,9 +701,17 @@ namespace Oxide.Plugins
 									}
 								}
 
-								i.MoveToContainer(box.inventory);
+								int targetPos = -1;
+								
+								if(item.ContainsKey("position"))
+									targetPos = Convert.ToInt32(item["position"]);
+								
+								i.MoveToContainer(box.inventory, targetPos);
 							}
-						};
+						}
+						
+						if(locker != null)
+							_equippingActive.SetValue(locker, false);						
 					}
 
 					var sign = entity.GetComponentInParent<Signage>();
@@ -926,10 +943,18 @@ namespace Oxide.Plugins
 				{
 					CodeLock codeLock = slotEntity.GetComponent<CodeLock>();
 
-					codedata.Add("code", codeLock.code.ToString());
-
-					if(saveShare)
+					codedata.Add("code", codeLock.code);
+					
+					if(saveShare)			
 						codedata.Add("whitelistPlayers", codeLock.whitelistPlayers);
+					
+					if(codeLock.guestCode != null && codeLock.guestCode.Length == 4)
+					{
+						codedata.Add("guestCode", codeLock.guestCode);
+					
+						if(saveShare)
+							codedata.Add("guestPlayers", codeLock.guestPlayers);
+					}											
 				} else if(slotEntity.GetComponent<KeyLock>()) {
 					KeyLock keyLock = slotEntity.GetComponent<KeyLock>();
 					var code = keyLock.keyCode;
@@ -1082,9 +1107,8 @@ namespace Oxide.Plugins
 						if(!string.IsNullOrEmpty(code))
 						{
 							CodeLock codeLock = slotEntity.GetComponent<CodeLock>();
-							codeLock.code = code;
-							codeLock.SetFlag(BaseEntity.Flags.Locked, true);
-
+							codeLock.code = code;					
+							
 							if(slotData.ContainsKey("whitelistPlayers"))
 							{
 								foreach(var userID in slotData["whitelistPlayers"] as List<object>)
@@ -1092,6 +1116,23 @@ namespace Oxide.Plugins
 									codeLock.whitelistPlayers.Add(Convert.ToUInt64(userID));
 								}
 							}
+							
+							if(slotData.ContainsKey("guestCode"))
+							{
+								string guestCode = (string)slotData["guestCode"];
+								
+								codeLock.guestCode = guestCode;
+								
+								if(slotData.ContainsKey("guestPlayers"))
+								{
+									foreach(var userID in slotData["guestPlayers"] as List<object>)
+									{
+										codeLock.guestPlayers.Add(Convert.ToUInt64(userID));
+									}
+								}
+							}
+							
+							codeLock.SetFlag(BaseEntity.Flags.Locked, true);
 						}
 					} else if(slotEntity.GetComponent<KeyLock>()) {
 						int code = Convert.ToInt32(slotData["code"]);
