@@ -11,7 +11,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-	[Info("Copy Paste", "Reneb", "3.4.3", ResourceId = 716)]
+	[Info("Copy Paste", "Reneb", "3.4.5", ResourceId = 716)]
 	[Description("Copy and paste your buildings to save them or move them")]
 
 	class CopyPaste : RustPlugin
@@ -41,7 +41,9 @@ namespace Oxide.Plugins
 
 		private enum CopyMechanics { Building, Proximity }
 
-		FieldInfo _equippingActive = typeof(Locker).GetField("equippingActive", (BindingFlags.Instance | BindingFlags.NonPublic));
+		private FieldInfo _hasCode = typeof(CodeLock).GetField("hasCode", (BindingFlags.Instance | BindingFlags.NonPublic));
+		private FieldInfo _hasGuestCode = typeof(CodeLock).GetField("hasGuestCode", (BindingFlags.Instance | BindingFlags.NonPublic));
+		private FieldInfo _equippingActive = typeof(Locker).GetField("equippingActive", (BindingFlags.Instance | BindingFlags.NonPublic));
 		
 		//Config
 
@@ -1108,6 +1110,7 @@ namespace Oxide.Plugins
 						{
 							CodeLock codeLock = slotEntity.GetComponent<CodeLock>();
 							codeLock.code = code;					
+							_hasCode.SetValue(codeLock, true);
 							
 							if(slotData.ContainsKey("whitelistPlayers"))
 							{
@@ -1122,6 +1125,7 @@ namespace Oxide.Plugins
 								string guestCode = (string)slotData["guestCode"];
 								
 								codeLock.guestCode = guestCode;
+								_hasGuestCode.SetValue(codeLock, true);
 								
 								if(slotData.ContainsKey("guestPlayers"))
 								{
