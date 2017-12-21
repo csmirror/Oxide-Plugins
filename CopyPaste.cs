@@ -1,5 +1,6 @@
 ﻿using Facepunch;
 using Oxide.Core;
+using Oxide.Core.Libraries;
 using Newtonsoft.Json;
 using ProtoBuf;
 using System;
@@ -11,7 +12,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-	[Info("Copy Paste", "Reneb", "3.4.5", ResourceId = 716)]
+	[Info("Copy Paste", "Reneb", "3.5.3", ResourceId = 716)]
 	[Description("Copy and paste your buildings to save them or move them")]
 
 	class CopyPaste : RustPlugin
@@ -37,8 +38,6 @@ namespace Oxide.Plugins
 			BaseEntity.Slot.LowerModifier
 		};
 
-		private DataFileSystem dataSystem = Interface.Oxide.DataFileSystem;
-
 		private enum CopyMechanics { Building, Proximity }
 
 		private FieldInfo _hasCode = typeof(CodeLock).GetField("hasCode", (BindingFlags.Instance | BindingFlags.NonPublic));
@@ -56,7 +55,7 @@ namespace Oxide.Plugins
 
 			[JsonProperty(PropertyName = "Paste Options")]
 			public PasteOptions Paste { get; set; }
-
+			
 			public class CopyOptions
 			{
 				[JsonProperty(PropertyName = "Buildings (true/false)")]
@@ -67,10 +66,14 @@ namespace Oxide.Plugins
 				[DefaultValue(true)]
 				public bool Deployables { get; set; } = true;
 
+				[JsonProperty(PropertyName = "Check radius from each entity (true/false)")]
+				[DefaultValue(true)]
+				public bool EachToEach { get; set; } = true;
+				
 				[JsonProperty(PropertyName = "Inventories (true/false)")]
 				[DefaultValue(true)]
 				public bool Inventories { get; set; } = true;
-
+				
 				[JsonProperty(PropertyName = "Share (true/false)")]
 				[DefaultValue(false)]
 				public bool Share { get; set; } = false;
@@ -89,14 +92,18 @@ namespace Oxide.Plugins
 				[JsonProperty(PropertyName = "Deployables (true/false)")]
 				[DefaultValue(true)]
 				public bool Deployables { get; set; } = true;
-
+				
 				[JsonProperty(PropertyName = "Inventories (true/false)")]
 				[DefaultValue(true)]
 				public bool Inventories { get; set; } = true;
 				
 				[JsonProperty(PropertyName = "Vending Machines (true/false)")]
 				[DefaultValue(true)]
-				public bool VendingMachines { get; set; } = true;				
+				public bool VendingMachines { get; set; } = true;	
+
+				[JsonProperty(PropertyName = "Stability (true/false)")]
+				[DefaultValue(true)]
+				public bool Stability { get; set; } = true;					
 			}
 		}
 
@@ -158,31 +165,27 @@ namespace Oxide.Plugins
 			if(player == null)
 				return Lang("NOT_FOUND_PLAYER", player.UserIDString);
 
-			var ViewAngles = Quaternion.Euler(player.GetNetworkRotation());
-			BaseEntity sourceEntity;
-			Vector3 sourcePoint;
-
-			if(!FindRayEntity(player.eyes.position, ViewAngles * Vector3.forward, out sourcePoint, out sourceEntity, rayCopy))
+			RaycastHit hit;
+			
+			if(!Physics.Raycast(player.eyes.HeadRay(), out hit, 1000f, rayCopy))
 				return Lang("NO_ENTITY_RAY", player.UserIDString);
-
-			return TryCopy(sourcePoint, sourceEntity.transform.rotation.ToEulerAngles(), filename, ViewAngles.ToEulerAngles().y, args);
+			
+			return TryCopy(hit.point, hit.GetEntity().transform.rotation.ToEulerAngles(), filename, Quaternion.Euler(player.GetNetworkRotation()).ToEulerAngles().y, args);
 		}
-
+		
 		object TryPasteFromSteamID(ulong userID, string filename, string[] args)
 		{
 			var player = BasePlayer.FindByID(userID);
 
 			if(player == null)
 				return Lang("NOT_FOUND_PLAYER", player.UserIDString);
-
-			var ViewAngles = Quaternion.Euler(player.GetNetworkRotation());
-			BaseEntity sourceEntity;
-			Vector3 sourcePoint;
-
-			if(!FindRayEntity(player.eyes.position, ViewAngles * Vector3.forward, out sourcePoint, out sourceEntity, rayPaste))
+			
+			RaycastHit hit;
+			
+			if(!Physics.Raycast(player.eyes.HeadRay(), out hit, 1000f, rayPaste))
 				return Lang("NO_ENTITY_RAY", player.UserIDString);
 
-			return TryPaste(sourcePoint, filename, player, ViewAngles.ToEulerAngles().y, args);
+			return TryPaste(hit.point, filename, player, Quaternion.Euler(player.GetNetworkRotation()).ToEulerAngles().y, args);
 		}
 
 		object TryPasteFromVector3(Vector3 pos, float rotationCorrection, string filename, string[] args)
@@ -202,7 +205,21 @@ namespace Oxide.Plugins
 
 			return true;
 		}
+		
+		private bool CheckPlaced(string prefabname, Vector3 pos, Quaternion rot)
+		{
+			List<BaseEntity> ents = new List<BaseEntity>();
+			Vis.Entities<BaseEntity>(pos, 2f, ents);
 
+			foreach(BaseEntity ent in ents)
+			{
+				if(ent.PrefabName == prefabname && ent.transform.position == pos && ent.transform.rotation == rot)
+					return true;
+			}
+
+			return false;
+		}
+		
 		private object cmdPasteBack(BasePlayer player, string[] args)
 		{
 			string userIDString = (player == null) ? serverID : player.UserIDString;
@@ -242,10 +259,10 @@ namespace Oxide.Plugins
 			return true;
 		}
 
-		private object Copy(Vector3 sourcePos, Vector3 sourceRot, string filename, float RotationCorrection, CopyMechanics copyMechanics, float range, bool saveBuildings, bool saveDeployables, bool saveInventories, bool saveTree, bool saveShare)
+		private object Copy(Vector3 sourcePos, Vector3 sourceRot, string filename, float RotationCorrection, CopyMechanics copyMechanics, float range, bool saveBuildings, bool saveDeployables, bool saveInventories, bool saveTree, bool saveShare, bool eachToEach)
 		{
 			var rawData = new List<object>();
-			var copy = CopyProcess(sourcePos, sourceRot, RotationCorrection, range, saveBuildings, saveDeployables, saveInventories, saveTree, saveShare, copyMechanics);
+			var copy = CopyProcess(sourcePos, sourceRot, RotationCorrection, range, saveBuildings, saveDeployables, saveInventories, saveTree, saveShare, copyMechanics, eachToEach);
 
 			if(copy is string)
 				return copy;
@@ -266,23 +283,23 @@ namespace Oxide.Plugins
 			};
 
 			string path = subDirectory + filename;
-			var CopyData = dataSystem.GetDatafile(path);
+			var CopyData = Interface.Oxide.DataFileSystem.GetDatafile(path);
 
 			CopyData.Clear();
 			CopyData["default"] = defaultData;
 			CopyData["entities"] = rawData;
 
-			dataSystem.SaveDatafile(path);
+			Interface.Oxide.DataFileSystem.SaveDatafile(path);
 
 			return true;
 		}
 
-		private object CopyProcess(Vector3 sourcePos, Vector3 sourceRot, float RotationCorrection, float range, bool saveBuildings, bool saveDeployables, bool saveInventories, bool saveTree, bool saveShare, CopyMechanics copyMechanics)
+		private object CopyProcess(Vector3 sourcePos, Vector3 sourceRot, float RotationCorrection, float range, bool saveBuildings, bool saveDeployables, bool saveInventories, bool saveTree, bool saveShare, CopyMechanics copyMechanics, bool eachToEach)
 		{
 			var rawData = new List<object>();
 			var houseList = new List<BaseEntity>();
 			var checkFrom = new List<Vector3> { sourcePos };
-			uint buildingid = 0;
+			uint buildingID = 0;
 			int currentLayer = copyLayer;
 			int current = 0;
 
@@ -296,25 +313,25 @@ namespace Oxide.Plugins
 
 				foreach(var entity in list)
 				{
-					if(!isValid(entity) || houseList.Contains(entity))
+					if(!IsValid(entity) || houseList.Contains(entity))
 						continue;
 				
 					houseList.Add(entity);
 
 					if(copyMechanics == CopyMechanics.Building)
 					{
-						BuildingBlock buildingblock = entity.GetComponentInParent<BuildingBlock>();
+						BuildingBlock buildingBlock = entity.GetComponentInParent<BuildingBlock>();
 
-						if(buildingblock)
+						if(buildingBlock)
 						{
-							if(buildingid == 0)
-								buildingid = buildingblock.buildingID;
-							else if(buildingid != buildingblock.buildingID)
+							if(buildingID == 0)
+								buildingID = buildingBlock.buildingID;
+							else if(buildingID != buildingBlock.buildingID)
 								continue;
 						}
 					}
 
-					if(!checkFrom.Contains(entity.transform.position))
+					if(eachToEach && !checkFrom.Contains(entity.transform.position))
 						checkFrom.Add(entity.transform.position);
 
 					if(!saveBuildings && entity.GetComponentInParent<BuildingBlock>() != null)
@@ -331,32 +348,34 @@ namespace Oxide.Plugins
 
 			return rawData;
 		}
-
+		
 		private Dictionary<string, object> EntityData(BaseEntity entity, Vector3 sourcePos, Vector3 sourceRot, Vector3 entPos, Vector3 entRot, float diffRot, bool saveInventories, bool saveShare)
 		{
 			var normalizedPos = NormalizePosition(sourcePos, entPos, diffRot);
-			var normalizedRot = entRot.y - diffRot;
+			
+			entRot.y -= diffRot;
 
 			var data = new Dictionary<string, object>
 			{
-				{ "prefabname", entity.PrefabName },
-				{ "skinid", entity.skinID },
-				{ "pos", new Dictionary<string,object>
+				{"prefabname", entity.PrefabName},
+				{"skinid", entity.skinID},
+				{"flags", TryCopyFlags(entity)},
+				{"pos", new Dictionary<string,object>
 					{
-						{ "x", normalizedPos.x.ToString() },
-						{ "y", normalizedPos.y.ToString() },
-						{ "z", normalizedPos.z.ToString() }
+						{"x", normalizedPos.x.ToString()},
+						{"y", normalizedPos.y.ToString()},
+						{"z", normalizedPos.z.ToString()}
 					}
 				},
-				{ "rot", new Dictionary<string,object>
+				{"rot", new Dictionary<string,object>
 					{
-						{ "x", entRot.x.ToString() },
-						{ "y", normalizedRot.ToString() },
-						{ "z", entRot.z.ToString() },
+						{"x", entRot.x.ToString()},
+						{"y", entRot.y.ToString()},
+						{"z", entRot.z.ToString()},
 					}
 				}
 			};
-
+			
 			TryCopySlots(entity, data, saveShare);
 
 			var buildingblock = entity.GetComponentInParent<BuildingBlock>();
@@ -436,7 +455,7 @@ namespace Oxide.Plugins
 
 				data.Add("sign", new Dictionary<string, object>
 				{
-					{"locked", sign.IsLocked() }
+					{"locked", sign.IsLocked()}
 				});
 
 				if(sign.textureID > 0 && imageByte != null)
@@ -551,16 +570,16 @@ namespace Oxide.Plugins
 
 		private bool HasAccess(BasePlayer player, string permName)
 		{
-			return player.net.connection.authLevel > 1 || permission.UserHasPermission(player.UserIDString, permName);
+			return player.IsAdmin || permission.UserHasPermission(player.UserIDString, permName);
 		}
 
-		private bool isValid(BaseEntity entity)
+		private bool IsValid(BaseEntity entity)
 		{
 			return (entity.GetComponentInParent<BuildingBlock>() != null || entity.GetComponentInParent<BaseCombatEntity>() != null || entity.GetComponentInParent<Spawnable>() != null);
 		}
 
 		private string Lang(string key, string userID = null, params object[] args) => string.Format(lang.GetMessage(key, this, userID), args);
-
+		
 		private Vector3 NormalizePosition(Vector3 InitialPos, Vector3 CurrentPos, float diffRot)
 		{
 			var transformedPos = CurrentPos - InitialPos;
@@ -572,242 +591,272 @@ namespace Oxide.Plugins
 
 			return transformedPos;
 		}
-
-		private List<BaseEntity> Paste(List<Dictionary<string,object>> entities, Vector3 startPos, BasePlayer player)
+		
+		private List<BaseEntity> Paste(List<Dictionary<string,object>> entities, Vector3 startPos, BasePlayer player, bool stability)
 		{
-			bool unassignid = true;
-			uint buildingid = 0;
+			uint buildingID = 0;
 			var pastedEntities = new List<BaseEntity>();
 
 			foreach(var data in entities)
 			{
-				var prefabname = (string)data["prefabname"];
-				var skinid = ulong.Parse(data["skinid"].ToString());
-				var pos = (Vector3)data["position"];
-				var rot = (Quaternion)data["rotation"];
+				string prefabname = (string)data["prefabname"];
+				ulong skinid = ulong.Parse(data["skinid"].ToString());
+				Vector3 pos = (Vector3)data["position"];
+				Quaternion rot = (Quaternion)data["rotation"];
 
-				bool isPlaced = false;
-
-				List<BaseEntity> ents = new List<BaseEntity>();
-				Vis.Entities<BaseEntity>(pos, 2f, ents);
-
-				foreach(BaseEntity ent in ents)
-				{
-					if(ent.PrefabName == prefabname && ent.transform.position == pos && ent.transform.rotation == rot)
-					{
-						isPlaced = true;
-						break;
-					}
-				}
-
-				if(isPlaced)
+				if(CheckPlaced(prefabname, pos, rot))
 					continue;
 
 				var entity = GameManager.server.CreateEntity(prefabname, pos, rot, true);
 
-				if(entity != null)
+				if(entity == null)
+					continue;
+				
+				entity.transform.position = pos;
+				entity.transform.rotation = rot;
+
+				if(player != null)
 				{
-					entity.transform.position = pos;
-					entity.transform.rotation = rot;
+					entity.SendMessage("SetDeployedBy", player, SendMessageOptions.DontRequireReceiver);
+					entity.OwnerID = player.userID;
+				}
 
-					if(player != null)
+				BuildingBlock buildingBlock = entity.GetComponentInParent<BuildingBlock>();
+
+				if(buildingBlock != null)
+				{
+					buildingBlock.blockDefinition = PrefabAttribute.server.Find<Construction>(buildingBlock.prefabID);
+					buildingBlock.SetGrade((BuildingGrade.Enum)data["grade"]);
+					
+					if(!stability)
+						buildingBlock.grounded = true;
+				}
+				
+				DecayEntity decayEntity = entity.GetComponentInParent<DecayEntity>();
+				
+				if(decayEntity != null)
+				{
+					if(buildingID == 0)
+						buildingID = BuildingManager.server.NewBuildingID();
+
+					decayEntity.AttachToBuilding(buildingID);
+				}
+
+				entity.skinID = skinid;
+				entity.Spawn();
+
+				var baseCombat = entity.GetComponentInParent<BaseCombatEntity>();
+
+				if(baseCombat != null)
+					baseCombat.ChangeHealth(baseCombat.MaxHealth());
+
+				pastedEntities.AddRange(TryPasteSlots(entity, data));
+
+				var box = entity.GetComponentInParent<StorageContainer>();
+
+				if(box != null)
+				{				
+					Locker locker = box as Locker;
+					
+					if(locker != null)
+						_equippingActive.SetValue(locker, true);
+					
+					box.inventory.Clear();
+					
+					var items = new List<object>();
+
+					if(data.ContainsKey("items"))					
+						items = data["items"] as List<object>;
+					
+					foreach(var itemDef in items)
 					{
-						entity.SendMessage("SetDeployedBy", player, SendMessageOptions.DontRequireReceiver);
-						entity.OwnerID = player.userID;
-					}
+						var item = itemDef as Dictionary<string, object>;
+						var itemid = Convert.ToInt32(item["id"]);
+						var itemamount = Convert.ToInt32(item["amount"]);
+						var itemskin = ulong.Parse(item["skinid"].ToString());
+						var itemcondition = Convert.ToSingle(item["condition"]);
 
-					var buildingblock = entity.GetComponentInParent<BuildingBlock>();
+						var i = ItemManager.CreateByItemID(itemid, itemamount, itemskin);
 
-					if(buildingblock != null)
-					{
-						buildingblock.blockDefinition = PrefabAttribute.server.Find<Construction>(buildingblock.prefabID);
-						buildingblock.SetGrade((BuildingGrade.Enum)data["grade"]);
-
-						if(unassignid)
+						if(i != null)
 						{
-							buildingid = BuildingBlock.NewBuildingID();
-							unassignid = false;
-						}
+							i.condition = itemcondition;
 
-						buildingblock.buildingID = buildingid;
-					}
-
-					entity.skinID = skinid;
-					entity.Spawn();
-
-					var basecombat = entity.GetComponentInParent<BaseCombatEntity>();
-
-					if(basecombat != null)
-						basecombat.ChangeHealth(basecombat.MaxHealth());
-
-					TryPasteSlots(entity, data);
-
-					var box = entity.GetComponentInParent<StorageContainer>();
-
-					if(box != null)
-					{				
-						Locker locker = box as Locker;
-						
-						if(locker != null)
-							_equippingActive.SetValue(locker, true);
-						
-						box.inventory.Clear();
-						var items = data["items"] as List<object>;
-						var itemlist = new List<ItemAmount>();
-
-						foreach(var itemDef in items)
-						{
-							var item = itemDef as Dictionary<string, object>;
-							var itemid = Convert.ToInt32(item["id"]);
-							var itemamount = Convert.ToInt32(item["amount"]);
-							var itemskin = ulong.Parse(item["skinid"].ToString());
-							var itemcondition = Convert.ToSingle(item["condition"]);
-
-							var i = ItemManager.CreateByItemID(itemid, itemamount, itemskin);
-
-							if(i != null)
+							if(item.ContainsKey("magazine"))
 							{
-								i.condition = itemcondition;
+								var heldent = i.GetHeldEntity();
 
-								if(item.ContainsKey("magazine"))
+								if(heldent != null)
 								{
-									var heldent = i.GetHeldEntity();
+									var projectiles = heldent.GetComponent<BaseProjectile>();
 
-									if(heldent != null)
+									if(projectiles != null)
 									{
-										var projectiles = heldent.GetComponent<BaseProjectile>();
+										var magazine = item["magazine"] as Dictionary<string, object>;
+										var ammotype = int.Parse(magazine.Keys.ToArray()[0]);
+										var ammoamount = int.Parse(magazine[ammotype.ToString()].ToString());
 
-										if(projectiles != null)
+										projectiles.primaryMagazine.ammoType = ItemManager.FindItemDefinition(ammotype);
+										projectiles.primaryMagazine.contents = ammoamount;
+									}
+
+									//TODO Не добавляет капли воды в некоторые контейнеры
+
+									if(item.ContainsKey("items"))
+									{
+										var itemContainsList = item["items"] as List<object>;
+
+										foreach(var itemContains in itemContainsList)
 										{
-											var magazine = item["magazine"] as Dictionary<string, object>;
-											var ammotype = int.Parse(magazine.Keys.ToArray()[0]);
-											var ammoamount = int.Parse(magazine[ammotype.ToString()].ToString());
+											var contents = itemContains as Dictionary<string, object>;
 
-											projectiles.primaryMagazine.ammoType = ItemManager.FindItemDefinition(ammotype);
-											projectiles.primaryMagazine.contents = ammoamount;
-										}
-
-										//TODO: Compability water
-
-										if(item.ContainsKey("items"))
-										{
-											var itemContainsList = item["items"] as List<object>;
-
-											foreach(var itemContains in itemContainsList)
-											{
-												var contents = itemContains as Dictionary<string, object>;
-
-												i.contents.AddItem(ItemManager.FindItemDefinition(Convert.ToInt32(contents["id"])), Convert.ToInt32(contents["amount"]));
-											}
+											i.contents.AddItem(ItemManager.FindItemDefinition(Convert.ToInt32(contents["id"])), Convert.ToInt32(contents["amount"]));
 										}
 									}
 								}
-
-								int targetPos = -1;
-								
-								if(item.ContainsKey("position"))
-									targetPos = Convert.ToInt32(item["position"]);
-								
-								i.MoveToContainer(box.inventory, targetPos);
 							}
-						}
-						
-						if(locker != null)
-							_equippingActive.SetValue(locker, false);						
-					}
 
-					var sign = entity.GetComponentInParent<Signage>();
-
-					if(sign != null && data.ContainsKey("sign"))
-					{
-						var signData = data["sign"] as Dictionary<string, object>;
-
-						if(signData.ContainsKey("texture"))
-						{
-							var stringSign = Convert.FromBase64String(signData["texture"].ToString());
-							sign.textureID = FileStorage.server.Store(stringSign, FileStorage.Type.png, sign.net.ID);
-						}
-
-						if(Convert.ToBoolean(signData["locked"]))
-							sign.SetFlag(BaseEntity.Flags.Locked, true);
-
-						sign.SendNetworkUpdate();
-					}
-
-					var sleepingBag = entity.GetComponentInParent<SleepingBag>();
-
-					if(sleepingBag != null && data.ContainsKey("sleepingbag"))
-					{
-						var bagData = data["sleepingbag"] as Dictionary<string, object>;
-
-						sleepingBag.niceName = bagData["niceName"].ToString();
-						sleepingBag.deployerUserID = ulong.Parse(bagData["deployerUserID"].ToString());
-						sleepingBag.SetPublic(Convert.ToBoolean(bagData["isPublic"]));
-					}
-
-					var cupboard = entity.GetComponentInParent<BuildingPrivlidge>();
-
-					if(cupboard != null)
-					{
-						List<ulong> authorizedPlayers = new List<ulong>();
-
-						if(data.ContainsKey("cupboard"))
-						{
-							var cupboardData = data["cupboard"] as Dictionary<string, object>;
-							authorizedPlayers = (cupboardData["authorizedPlayers"] as List<object>).Select(y => Convert.ToUInt64(y)).ToList();
-						}
-
-						if(data.ContainsKey("auth") && player != null && !authorizedPlayers.Contains(player.userID))
-							authorizedPlayers.Add(player.userID);
-
-						foreach(var userID in authorizedPlayers)
-						{
-							cupboard.authorizedPlayers.Add(new PlayerNameID()
-							{
-								userid = Convert.ToUInt64(userID),
-								username = "Player"
-							});
-						}
-
-						//cupboard.UpdateAllPlayers();
-						cupboard.SendNetworkUpdate(BasePlayer.NetworkQueue.Update);
-					}
-					
-					var vendingMachine = entity.GetComponentInParent<VendingMachine>();
-
-					if(vendingMachine != null && data.ContainsKey("vendingmachine"))
-					{						
-						var vendingData = data["vendingmachine"] as Dictionary<string, object>;
-						
-						vendingMachine.shopName = vendingData["shopName"].ToString();
-						vendingMachine.SetFlag(BaseEntity.Flags.Reserved4, Convert.ToBoolean(vendingData["isBroadcasting"]));
-						
-						var sellOrders = vendingData["sellOrders"] as List<object>;
-
-						foreach(var orderPreInfo in sellOrders)
-						{				
-							var orderInfo = orderPreInfo as Dictionary<string, object>;
+							int targetPos = -1;
 							
-							vendingMachine.sellOrders.sellOrders.Add(new ProtoBuf.VendingMachine.SellOrder()
-							{
-								ShouldPool = false,
-								itemToSellID = Convert.ToInt32(orderInfo["itemToSellID"]),
-								itemToSellAmount = Convert.ToInt32(orderInfo["itemToSellAmount"]),
-								currencyID = Convert.ToInt32(orderInfo["currencyID"]),
-								currencyAmountPerItem = Convert.ToInt32(orderInfo["currencyAmountPerItem"])
-							});  
-						}	
-											
-						vendingMachine.FullUpdate();
+							if(item.ContainsKey("position"))
+								targetPos = Convert.ToInt32(item["position"]);
+							
+							i.MoveToContainer(box.inventory, targetPos);
+						}
 					}
 					
-					pastedEntities.Add(entity);
+					if(locker != null)
+						_equippingActive.SetValue(locker, false);				
 				}
+				 
+				var sign = entity.GetComponentInParent<Signage>();
+
+				if(sign != null && data.ContainsKey("sign"))
+				{
+					var signData = data["sign"] as Dictionary<string, object>;
+
+					if(signData.ContainsKey("texture"))
+					{
+						var stringSign = Convert.FromBase64String(signData["texture"].ToString());
+						sign.textureID = FileStorage.server.Store(stringSign, FileStorage.Type.png, sign.net.ID);
+					}
+
+					if(Convert.ToBoolean(signData["locked"]))
+						sign.SetFlag(BaseEntity.Flags.Locked, true);
+
+					sign.SendNetworkUpdate();
+				}
+
+				var sleepingBag = entity.GetComponentInParent<SleepingBag>();
+
+				if(sleepingBag != null && data.ContainsKey("sleepingbag"))
+				{
+					var bagData = data["sleepingbag"] as Dictionary<string, object>;
+
+					sleepingBag.niceName = bagData["niceName"].ToString();
+					sleepingBag.deployerUserID = ulong.Parse(bagData["deployerUserID"].ToString());
+					sleepingBag.SetPublic(Convert.ToBoolean(bagData["isPublic"]));
+				}
+				
+				var autoturret = entity.GetComponentInParent<AutoTurret>();
+
+				if(autoturret != null)
+				{
+					if(player != null)
+					{
+						autoturret.authorizedPlayers.Add(new PlayerNameID()
+						{
+							userid = Convert.ToUInt64(player.userID),
+							username = "Player"
+						});
+					}		
+
+					autoturret.SendNetworkUpdate(BasePlayer.NetworkQueue.Update);
+				}
+				
+				var cupboard = entity.GetComponentInParent<BuildingPrivlidge>();
+
+				if(cupboard != null)
+				{
+					List<ulong> authorizedPlayers = new List<ulong>();
+
+					if(data.ContainsKey("cupboard"))
+					{
+						var cupboardData = data["cupboard"] as Dictionary<string, object>;
+						authorizedPlayers = (cupboardData["authorizedPlayers"] as List<object>).Select(y => Convert.ToUInt64(y)).ToList();
+					}
+
+					if(data.ContainsKey("auth") && player != null && !authorizedPlayers.Contains(player.userID))
+						authorizedPlayers.Add(player.userID);
+
+					foreach(var userID in authorizedPlayers)
+					{
+						cupboard.authorizedPlayers.Add(new PlayerNameID()
+						{
+							userid = Convert.ToUInt64(userID),
+							username = "Player"
+						});
+					}
+
+					cupboard.SendNetworkUpdate(BasePlayer.NetworkQueue.Update);
+				}
+	
+				var vendingMachine = entity.GetComponentInParent<VendingMachine>();
+
+				if(vendingMachine != null && data.ContainsKey("vendingmachine"))
+				{						
+					var vendingData = data["vendingmachine"] as Dictionary<string, object>;
+					
+					vendingMachine.shopName = vendingData["shopName"].ToString();
+					vendingMachine.SetFlag(BaseEntity.Flags.Reserved4, Convert.ToBoolean(vendingData["isBroadcasting"]));
+					
+					var sellOrders = vendingData["sellOrders"] as List<object>;
+
+					foreach(var orderPreInfo in sellOrders)
+					{				
+						var orderInfo = orderPreInfo as Dictionary<string, object>;
+						
+						vendingMachine.sellOrders.sellOrders.Add(new ProtoBuf.VendingMachine.SellOrder()
+						{
+							ShouldPool = false,
+							itemToSellID = Convert.ToInt32(orderInfo["itemToSellID"]),
+							itemToSellAmount = Convert.ToInt32(orderInfo["itemToSellAmount"]),
+							currencyID = Convert.ToInt32(orderInfo["currencyID"]),
+							currencyAmountPerItem = Convert.ToInt32(orderInfo["currencyAmountPerItem"])
+						});  
+					}	
+										
+					vendingMachine.FullUpdate();
+				}
+				
+				var flagsData = new Dictionary<string, object>();
+
+				if(data.ContainsKey("flags"))
+					flagsData = data["flags"] as Dictionary<string, object>;
+
+				var flags = new Dictionary<BaseEntity.Flags, bool>();
+
+				foreach(var flagData in flagsData)
+				{	
+					try //Enum.TryParse?
+					{
+						BaseEntity.Flags baseFlag = (BaseEntity.Flags)Enum.Parse(typeof(BaseEntity.Flags), flagData.Key);
+						
+						flags.Add(baseFlag, Convert.ToBoolean(flagData.Value));
+					} catch (Exception ex) { }
+				}
+
+				foreach(var flag in flags)
+				{
+					entity.SetFlag(flag.Key, flag.Value);
+				}
+				
+				pastedEntities.Add(entity);
 			}
 
 			return pastedEntities;
 		}
-
+		
 		private List<Dictionary<string, object>> PreLoadData(List<object> entities, Vector3 startPos, float RotationCorrection, bool deployables, bool inventories, bool auth, bool vending)
 		{
 			var eulerRotation = new Vector3(0f, RotationCorrection, 0f);
@@ -823,12 +872,9 @@ namespace Oxide.Plugins
 
 				var pos = (Dictionary<string, object>)data["pos"];
 				var rot = (Dictionary<string, object>)data["rot"];
-				var fixedRotation = Quaternion.EulerRotation(eulerRotation + new Vector3(Convert.ToSingle(rot["x"]), Convert.ToSingle(rot["y"]), Convert.ToSingle(rot["z"])));
-				var tempPos = quaternionRotation * (new Vector3(Convert.ToSingle(pos["x"]), Convert.ToSingle(pos["y"]), Convert.ToSingle(pos["z"])));
-				Vector3 newPos = tempPos + startPos;
 
-				data.Add("position", newPos);
-				data.Add("rotation", fixedRotation);
+				data.Add("position", quaternionRotation * (new Vector3(Convert.ToSingle(pos["x"]), Convert.ToSingle(pos["y"]), Convert.ToSingle(pos["z"]))) + startPos);
+				data.Add("rotation", Quaternion.EulerRotation(eulerRotation + new Vector3(Convert.ToSingle(rot["x"]), Convert.ToSingle(rot["y"]), Convert.ToSingle(rot["z"]))));
 
 				if(!inventories && data.ContainsKey("items"))
 					data["items"] = new List<object>();
@@ -847,7 +893,7 @@ namespace Oxide.Plugins
 
 		private object TryCopy(Vector3 sourcePos, Vector3 sourceRot, string filename, float RotationCorrection, string[] args)
 		{
-			bool saveBuildings = config.Copy.Buildings, saveDeployables = config.Copy.Deployables, saveInventories = config.Copy.Inventories, saveShare = config.Copy.Share, saveTree = config.Copy.Tree;
+			bool saveBuildings = config.Copy.Buildings, saveDeployables = config.Copy.Deployables, saveInventories = config.Copy.Inventories, saveShare = config.Copy.Share, saveTree = config.Copy.Tree, eachToEach = config.Copy.EachToEach;
 			CopyMechanics copyMechanics = CopyMechanics.Proximity;
 			float radius = 3f;
 
@@ -874,6 +920,12 @@ namespace Oxide.Plugins
 					case "d":
 					case "deployables":
 						if(!bool.TryParse(args[valueIndex], out saveDeployables))
+							return Lang("SYNTAX_BOOL", null, param);
+
+						break;
+					case "e":
+					case "each":
+						if(!bool.TryParse(args[valueIndex], out eachToEach))
 							return Lang("SYNTAX_BOOL", null, param);
 
 						break;
@@ -921,7 +973,7 @@ namespace Oxide.Plugins
 				}
 			}
 
-			return Copy(sourcePos, sourceRot, filename, RotationCorrection, copyMechanics, radius, saveBuildings, saveDeployables, saveInventories, saveTree, saveShare);
+			return Copy(sourcePos, sourceRot, filename, RotationCorrection, copyMechanics, radius, saveBuildings, saveDeployables, saveInventories, saveTree, saveShare, eachToEach);
 		}
 
 		private void TryCopySlots(BaseEntity ent, IDictionary<string, object> housedata, bool saveShare)
@@ -938,7 +990,8 @@ namespace Oxide.Plugins
 
 				var codedata = new Dictionary<string, object>
 				{
-					{"prefabname", slotEntity.PrefabName}
+					{"prefabname", slotEntity.PrefabName},
+					{"flags", TryCopyFlags(ent)}
 				};
 
 				if(slotEntity.GetComponent<CodeLock>())
@@ -972,23 +1025,35 @@ namespace Oxide.Plugins
 				housedata.Add(slotName, codedata);
 			}
 		}
+		
+		private Dictionary<string, object> TryCopyFlags(BaseEntity entity)
+		{
+			var flags = new Dictionary<string, object>();
+			
+			foreach(BaseEntity.Flags flag in Enum.GetValues(typeof(BaseEntity.Flags)))
+			{
+				flags.Add(flag.ToString(), entity.HasFlag(flag));
+			}
 
+			return flags;
+		}
+		
 		private object TryPaste(Vector3 startPos, string filename, BasePlayer player, float RotationCorrection, string[] args, bool autoHeight = true)
 		{
 			var userID = player?.UserIDString;
 
 			string path = subDirectory + filename;
 
-			if(!dataSystem.ExistsDatafile(path))
+			if(!Interface.Oxide.DataFileSystem.ExistsDatafile(path))
 				return Lang("FILE_NOT_EXISTS", userID);
 
-			var data = dataSystem.GetDatafile(path);
+			var data = Interface.Oxide.DataFileSystem.GetDatafile(path);
 
 			if(data["default"] == null || data["entities"] == null)
 				return Lang("FILE_BROKEN", userID);
 
 			float heightAdj = 0f, blockCollision = 0f;
-			bool  auth = config.Paste.Auth, inventories = config.Paste.Inventories, deployables = config.Paste.Deployables, vending = config.Paste.VendingMachines;
+			bool  auth = config.Paste.Auth, inventories = config.Paste.Inventories, deployables = config.Paste.Deployables, vending = config.Paste.VendingMachines, stability = config.Paste.Stability;
 
 			for(int i = 0; ; i = i + 2)
 			{
@@ -1035,6 +1100,12 @@ namespace Oxide.Plugins
 							return Lang("SYNTAX_BOOL", userID, param);
 
 						break;
+					case "s":
+					case "stability":
+						if(!bool.TryParse(args[valueIndex], out stability))
+							return Lang("SYNTAX_BOOL", userID, param);
+
+						break;
 					case "v":
 					case "vending":
 						if(!bool.TryParse(args[valueIndex], out vending))
@@ -1063,6 +1134,7 @@ namespace Oxide.Plugins
 				{
 					var pos = ((Vector3)entity["position"]);
 					pos.y += heightAdj;
+					
 					entity["position"] = pos;
 				}
 			}
@@ -1075,11 +1147,13 @@ namespace Oxide.Plugins
 					return collision;
 			}
 
-			return Paste(preloadData, startPos, player);
+			return Paste(preloadData, startPos, player, stability);
 		}
 
-		private void TryPasteSlots(BaseEntity ent, Dictionary<string, object> structure)
+		private List<BaseEntity> TryPasteSlots(BaseEntity ent, Dictionary<string, object> structure)
 		{
+			List<BaseEntity> entitySlots = new List<BaseEntity>();
+			
 			foreach(BaseEntity.Slot slot in checkSlots)
 			{
 				string slotName = slot.ToString().ToLower();
@@ -1100,67 +1174,71 @@ namespace Oxide.Plugins
 
 				ent.SetSlot(slot, slotEntity);
 
-				if(slotName == "lock" && slotData.ContainsKey("code"))
+				entitySlots.Add(slotEntity);
+				
+				if(slotName != "lock" || !slotData.ContainsKey("code"))
+					continue;
+				
+				if(slotEntity.GetComponent<CodeLock>())
 				{
-					if(slotEntity.GetComponent<CodeLock>())
+					string code = (string)slotData["code"];
+
+					if(!string.IsNullOrEmpty(code))
 					{
-						string code = (string)slotData["code"];
-
-						if(!string.IsNullOrEmpty(code))
+						CodeLock codeLock = slotEntity.GetComponent<CodeLock>();
+						codeLock.code = code;					
+						_hasCode.SetValue(codeLock, true);
+						
+						if(slotData.ContainsKey("whitelistPlayers"))
 						{
-							CodeLock codeLock = slotEntity.GetComponent<CodeLock>();
-							codeLock.code = code;					
-							_hasCode.SetValue(codeLock, true);
-							
-							if(slotData.ContainsKey("whitelistPlayers"))
+							foreach(var userID in slotData["whitelistPlayers"] as List<object>)
 							{
-								foreach(var userID in slotData["whitelistPlayers"] as List<object>)
+								codeLock.whitelistPlayers.Add(Convert.ToUInt64(userID));
+							}
+						}
+						
+						if(slotData.ContainsKey("guestCode"))
+						{
+							string guestCode = (string)slotData["guestCode"];
+							
+							codeLock.guestCode = guestCode;
+							_hasGuestCode.SetValue(codeLock, true);
+							
+							if(slotData.ContainsKey("guestPlayers"))
+							{
+								foreach(var userID in slotData["guestPlayers"] as List<object>)
 								{
-									codeLock.whitelistPlayers.Add(Convert.ToUInt64(userID));
+									codeLock.guestPlayers.Add(Convert.ToUInt64(userID));
 								}
 							}
-							
-							if(slotData.ContainsKey("guestCode"))
-							{
-								string guestCode = (string)slotData["guestCode"];
-								
-								codeLock.guestCode = guestCode;
-								_hasGuestCode.SetValue(codeLock, true);
-								
-								if(slotData.ContainsKey("guestPlayers"))
-								{
-									foreach(var userID in slotData["guestPlayers"] as List<object>)
-									{
-										codeLock.guestPlayers.Add(Convert.ToUInt64(userID));
-									}
-								}
-							}
-							
-							codeLock.SetFlag(BaseEntity.Flags.Locked, true);
 						}
-					} else if(slotEntity.GetComponent<KeyLock>()) {
-						int code = Convert.ToInt32(slotData["code"]);
-						KeyLock keyLock = slotEntity.GetComponent<KeyLock>();
+						
+						codeLock.SetFlag(BaseEntity.Flags.Locked, true);
+					}
+				} else if(slotEntity.GetComponent<KeyLock>()) {
+					int code = Convert.ToInt32(slotData["code"]);
+					KeyLock keyLock = slotEntity.GetComponent<KeyLock>();
 
-						if((code & 0x80) != 0)
-						{
-							keyLock.keyCode = (code & 0x7F);
-							keyLock.firstKeyCreated = true;
-							keyLock.SetFlag(BaseEntity.Flags.Locked, true);
-						}
+					if((code & 0x80) != 0)
+					{
+						keyLock.keyCode = (code & 0x7F);
+						keyLock.firstKeyCreated = true;
+						keyLock.SetFlag(BaseEntity.Flags.Locked, true);
 					}
 				}
 			}
+			
+			return entitySlots;
 		}
 
 		private object TryPasteBack(string filename, BasePlayer player, string[] args)
 		{
 			string path = subDirectory + filename;
 
-			if(!dataSystem.ExistsDatafile(path))
+			if(!Interface.Oxide.DataFileSystem.ExistsDatafile(path))
 				return Lang("FILE_NOT_EXISTS", player?.UserIDString);
 
-			var data = dataSystem.GetDatafile(path);
+			var data = Interface.Oxide.DataFileSystem.GetDatafile(path);
 
 			if(data["default"] == null || data["entities"] == null)
 				return Lang("FILE_BROKEN", player?.UserIDString);
@@ -1174,7 +1252,7 @@ namespace Oxide.Plugins
 		}
 
 		//Сhat commands
-
+		
 		[ChatCommand("copy")]
 		private void cmdChatCopy(BasePlayer player, string command, string[] args)
 		{
@@ -1266,7 +1344,7 @@ namespace Oxide.Plugins
 			else
 				SendReply(player, Lang("UNDO_SUCCESS", player.UserIDString));
 		}
-
+		
 		//Console commands [From Server]
 
 		[ConsoleCommand("pasteback")]
@@ -1372,7 +1450,7 @@ namespace Oxide.Plugins
 			{"BLOCKING_PASTE", new Dictionary<string, string>() {
 				{"en", "Something is blocking the paste"},
 				{"ru", "Что-то препятствует вставке"},
-			}},
+			}},		
 		};
 	}
 }
